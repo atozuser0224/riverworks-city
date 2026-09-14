@@ -4,6 +4,8 @@ namespace Riverworks
 {
     public sealed class OrbitCamera : MonoBehaviour
     {
+        public const float MinimumZoom = 1.6f;
+        public const float MaximumZoom = 17.5f;
         public Camera Camera { get; private set; }
         public CameraCinematics Cinematics { get; private set; }
         public Vector3 AuthoredFocus => target;
@@ -30,10 +32,10 @@ namespace Riverworks
             Cinematics=gameObject.AddComponent<CameraCinematics>();Cinematics.Initialize(this);
         }
         public void Home() { Cinematics?.Reset();target=new Vector3(0,0,0.0f); zoom=7.0f; yaw=0; }
-        public void SetZoom(float size) { Cinematics?.Reset();zoom=Mathf.Clamp(size,1.6f,17.5f); }
+        public void SetZoom(float size) { Cinematics?.Reset();zoom=Mathf.Clamp(size,MinimumZoom,MaximumZoom); }
         public void CommitFocus(Vector3 focus,float size)
         {
-            target=focus;ClampTarget();zoom=Mathf.Clamp(size,1.6f,17.5f);
+            target=focus;ClampTarget();zoom=Mathf.Clamp(size,MinimumZoom,MaximumZoom);
         }
         /// <summary>Moves the camera by a screen-space drag delta. Positive delta follows the finger.</summary>
         public void PanScreen(Vector2 screenDelta)
@@ -68,7 +70,7 @@ namespace Riverworks
                 target += (right*x+forward*z)*dt*zoom*0.8f;
                 if(!overUi)
                 {
-                    zoom=Mathf.Clamp(zoom-Input.mouseScrollDelta.y*0.75f,1.6f,17.5f);
+                    zoom=Mathf.Clamp(zoom-Input.mouseScrollDelta.y*0.75f,MinimumZoom,MaximumZoom);
                     if(controller.CanPanWithMiddle || controller.CanPanWithRight)
                     {
                         if(!Input.GetMouseButtonDown(2)&&!Input.GetMouseButtonDown(1))

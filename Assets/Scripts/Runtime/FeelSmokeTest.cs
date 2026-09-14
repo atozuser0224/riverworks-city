@@ -591,6 +591,30 @@ namespace Riverworks
 
             cinematics.Reset();
             yield return new WaitForSecondsRealtime(.8f);
+            orbit.SetZoom(1.7f);
+            yield return new WaitForSecondsRealtime(.8f);
+            Check(Mathf.Abs(orbit.DisplayedSize-1.7f)<.015f,
+                "close zoom settles below the previous cinematic minimum");
+            orbit.PanScreen(new Vector2(12f,-6f));
+            Check(orbit.AuthoredSize<1.8f && orbit.AuthoredSize>=OrbitCamera.MinimumZoom,
+                "manual pan preserves close zoom instead of forcing a zoom-out");
+            yield return new WaitForSecondsRealtime(.25f);
+            orbit.Zoom(.96f);
+            Check(orbit.AuthoredSize<1.7f && orbit.AuthoredSize>=OrbitCamera.MinimumZoom,
+                "repeated manual zoom shares the same close-zoom limit as cinematics");
+            yield return new WaitForSecondsRealtime(3.15f);
+            float closeBase=orbit.AuthoredSize;
+            cinematics.Pulse(FeelCue.ResearchComplete);
+            Require(cinematics.IsActive,"close zoom can play a normal Feel pulse after manual suppression expires");
+            yield return new WaitForSecondsRealtime(.15f);
+            Check(cinematics.Size<1.8f && cinematics.Size>=OrbitCamera.MinimumZoom,
+                "a Feel pulse stays inside the current close-zoom range");
+            yield return new WaitForSecondsRealtime(.9f);
+            Check(Mathf.Abs(orbit.AuthoredSize-closeBase)<.015f && orbit.DisplayedSize<1.8f,
+                "close zoom remains intact after the pulse finishes");
+            orbit.SetZoom(6.1f);
+            yield return new WaitForSecondsRealtime(.8f);
+
             Vector3 reducedFocus = orbit.AuthoredFocus;
             float reducedSize = orbit.AuthoredSize;
             Vector3 reducedDisplayedFocus = orbit.DisplayedFocus;

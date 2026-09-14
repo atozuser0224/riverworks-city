@@ -16,7 +16,7 @@ namespace Riverworks.Editor
         {
             PlayerSettings.companyName="Riverworks Studio";
             PlayerSettings.productName="Riverworks";
-            PlayerSettings.bundleVersion="0.6.0";
+            PlayerSettings.bundleVersion="0.6.1";
             PlayerSettings.SetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.Standalone,"studio.riverworks.city");
             PlayerSettings.defaultScreenWidth=1600; PlayerSettings.defaultScreenHeight=900;
             PlayerSettings.defaultIsNativeResolution=false;

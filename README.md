@@ -2,7 +2,7 @@
 
 RIVERWORKS는 모노폴리 보드처럼 나뉜 영토 위에서 도시와 실제 물류 설비를 함께 건설하는 3D 도시 건설 게임입니다. 중세 정착지에서 시작해 도로와 생산망을 잇고, 기술을 연구해 르네상스와 산업 시대로 발전합니다.
 
-현재 소스는 **v0.6 주민 활동·안내 프로토타입**입니다. 건물, 주민, 도로, 벨트와 기계가 같은 21×21 도시와 같은 카메라를 사용합니다. 로우폴리 주민의 작업 동작, 컴팩트 HUD, Feel 피드백, 시청 도착 연출, 실제 주민 단우의 안내와 선택형 OpenRouter 주민 의사결정을 제공합니다.
+현재 소스는 **v0.6.1 주민 활동·안내 프로토타입**입니다. 건물, 주민, 도로, 벨트와 기계가 같은 21×21 도시와 같은 카메라를 사용합니다. 로우폴리 주민의 작업 동작, 컴팩트 HUD, Feel 피드백, 시청 도착 연출, 실제 주민 단우의 안내와 선택형 OpenRouter 주민 의사결정을 제공합니다.
 
 **플레이하려면 [최신 GitHub Release](https://github.com/atozuser0224/riverworks-city/releases/latest)에서 Windows ZIP을 받아 전체 압축을 풀고 `Riverworks.exe`를 실행하세요.** Unity 설치 없이 플레이할 수 있습니다. 주민 AI 게이트웨이는 별도의 선택 기능입니다. 이번 릴리스는 Windows용이며 Android 기기 검증은 완료하지 않았습니다.
 
@@ -119,10 +119,10 @@ dotnet run --project .\Tests\Riverworks.Tests.csproj -c Release
 | 공유 도시·물류 런타임 | 106개 통과 |
 | 컴팩트 HUD 런타임 | 248개 통과 |
 | 단우·튜토리얼 런타임 | 886개 통과 |
-| Feel 5.6.1 런타임 | 174개 통과 |
+| Feel 5.6.1 런타임 | 180개 통과 |
 | 로우폴리 주민·작업 런타임 | 306개 통과 |
 | 주민 AI `MOCK_CONTRACT` 런타임 | 77개 통과, 실제 제공자 호출 없음 |
 
-Windows 런타임 결과의 빌드 GUID는 모두 `fdda1404458e4331a5c66b3360c23dd0`입니다. 자동화 명령은 `Tools/Build.ps1`, `Tools/Test.ps1`, `Tools/Play.ps1`에 있습니다. Android는 `Tools/Build-Android.ps1`로 빌드하고 `Tools/Inspect-Android.ps1`로 산출물 구성을 검사합니다.
+Windows 런타임 결과의 빌드 GUID는 모두 `6305bd1d1d9c485c90bd4c7e4aeef363`입니다. 자동화 명령은 `Tools/Build.ps1`, `Tools/Test.ps1`, `Tools/Play.ps1`에 있습니다. Android는 `Tools/Build-Android.ps1`로 빌드하고 `Tools/Inspect-Android.ps1`로 산출물 구성을 검사합니다.
 
 위 결과는 v0.6 Android APK 생성, 실제 Android 기기 설치·터치·성능 또는 실제 OpenRouter 호출 성공을 뜻하지 않습니다. 이 세 범위는 아직 미검증입니다. 최신 산출물 상태는 [검증 기록](Docs/VERIFICATION.md)을 확인하세요.

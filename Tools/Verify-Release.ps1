@@ -9,7 +9,7 @@ param(
     [string]$Sha256Path,
 
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$ExpectedVersion = '0.6.0',
+    [string]$ExpectedVersion = '0.6.1',
 
     [Alias('AndroidApkPath')]
     [string]$ApkPath

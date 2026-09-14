@@ -8,7 +8,7 @@ RIVERWORKS v0.6은 Unity 6000.5.5f1 기반 단일 플레이어 공유 도시 프
 
 주민의 기본 일과와 단우 안내는 로컬 규칙으로 동작합니다. 별도의 `ResidentAiClient`와 `Server/` 게이트웨이는 OpenRouter 모델이 제안한 제한된 방문 계획을 선택적으로 적용합니다. 모델이 건설·경제·생산 상태를 직접 바꾸는 API는 없으며, 연결되지 않았거나 검증에 실패하면 `CitizenSimulation`의 기존 일과를 계속 사용합니다.
 
-현재 v0.6 Windows 빌드와 도시·통합 물류·컴팩트 UI·튜토리얼·Feel·주민 AI 계약 런타임 검사의 GUID는 `fdda1404458e4331a5c66b3360c23dd0`입니다. 주민 AI 검사는 실제 제공자 호출이 없는 `MOCK_CONTRACT`이고, 유효한 OpenRouter 키가 없어 `LIVE_OPENROUTER`는 실행하지 못했습니다. v0.6 Android APK 생성과 실제 기기 설치·터치·성능도 아직 완료되지 않았습니다. 세부 결과는 [검증 기록](VERIFICATION.md)에 있습니다.
+현재 v0.6 Windows 빌드와 도시·통합 물류·컴팩트 UI·튜토리얼·Feel·주민 AI 계약 런타임 검사의 GUID는 `6305bd1d1d9c485c90bd4c7e4aeef363`입니다. 주민 AI 검사는 실제 제공자 호출이 없는 `MOCK_CONTRACT`이고, 유효한 OpenRouter 키가 없어 `LIVE_OPENROUTER`는 실행하지 못했습니다. v0.6 Android APK 생성과 실제 기기 설치·터치·성능도 아직 완료되지 않았습니다. 세부 결과는 [검증 기록](VERIFICATION.md)에 있습니다.
 
 ## 실행 객체 그래프
 
@@ -359,7 +359,7 @@ dotnet run --project .\Tests\Riverworks.Tests.csproj -c Release
 | `FeelSmokeTest` | 174개 PASS |
 | `ResidentAiSmokeTest` | 77개 PASS, `MOCK_CONTRACT`, 실제 제공자 호출 없음 |
 
-모든 Windows 런타임 결과는 빌드 GUID `fdda1404458e4331a5c66b3360c23dd0`에서 오류 없이 종료됐습니다. `FeelSmokeTest`는 실제 `MMF_Player`, 시청 근접 줌, 수동 카메라 취소와 기준 변환 복원을 포함하고, `TutorialSmokeTest`는 11단계·19개 기능 안내, 실제 단우 도로 이동, 카메라 추적, 초상화 부재와 저장 경계를 포함합니다.
+모든 Windows 런타임 결과는 빌드 GUID `6305bd1d1d9c485c90bd4c7e4aeef363`에서 오류 없이 종료됐습니다. `FeelSmokeTest`는 실제 `MMF_Player`, 시청 근접 줌, 수동 카메라 취소와 기준 변환 복원을 포함하고, `TutorialSmokeTest`는 11단계·19개 기능 안내, 실제 단우 도로 이동, 카메라 추적, 초상화 부재와 저장 경계를 포함합니다.
 
 순수 테스트와 Windows 런타임 통과는 Android 또는 외부 제공자 검증을 뜻하지 않습니다. v0.6 Android APK 생성·서명·구성 검사와 실제 기기 설치·터치·성능은 아직 완료되지 않았습니다. 주민 AI도 로컬 계약 서버까지만 확인했으며 실제 `LIVE_OPENROUTER` 호출은 키 부재로 미검증입니다. 최신 [검증 기록](VERIFICATION.md)의 실제 산출물 보고를 기준으로 상태를 판단해야 합니다.
 

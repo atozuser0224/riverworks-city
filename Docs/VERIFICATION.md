@@ -1,22 +1,22 @@
-# RIVERWORKS v0.6 Windows 검증 기록
+# RIVERWORKS v0.6.1 Windows 검증 기록
 
 검증일: 2026-09-14. Unity 6000.5.5f1. 저장 형식은 v4를 유지한다.
 
 | 범위 | 결과 | 근거 |
 |---|---|---|
-| 도시·기술·물류·주민 핵심 검사 | 695개 통과 | Artifacts/resident-release-tests.log |
+| 도시·기술·물류·주민 핵심 검사 | 695개 통과 | Artifacts/v061-tests.log |
 | Unity 저장·복원·이전 버전 호환 | 64개 통과 | Artifacts/save-validation-results.txt |
-| Windows x64 빌드 | 오류 0, 경고 30, 107,959,667바이트 | Artifacts/build-result.txt |
+| Windows x64 빌드 | 오류 0, 경고 30, 107,960,691바이트 | Artifacts/build-result.txt |
 | 도시 실행 | 59개 통과 | Artifacts/Smoke/runtime-results.txt |
 | 같은 도시의 물류 실행 | 106개 통과 | Artifacts/SharedCitySmoke/shared-city-results.txt |
 | 컴팩트 UI 실행 | 248개 통과 | Artifacts/CompactUiSmoke/compact-ui-results.txt |
-| Feel 연출·카메라 | 174개 통과 | Artifacts/FeelSmoke/feel-results.txt |
+| Feel 연출·카메라 | 180개 통과 | Artifacts/FeelSmoke/feel-results.txt |
 | 단우·기본/후속 튜토리얼 | 886개 통과 | Artifacts/TutorialSmoke/tutorial-results.txt |
 | 주민 모델·건물별 작업 | 306개 통과 | Artifacts/ResidentActivitySmoke/resident-activity-results.txt |
 | 주민 AI HTTP 계약 | 77개 통과, MOCK_CONTRACT | Artifacts/ResidentAiSmoke/resident-ai-results.txt |
 | Node 게이트웨이 fixture 검사 | 22개 통과 | Artifacts/resident-release-server-tests.log |
 
-Windows 실행 검사 전체의 빌드 GUID는 **fdda1404458e4331a5c66b3360c23dd0**이며 런타임 오류는 모두 0이다. 빌드 경고 수와 런타임 오류 수를 구분해 기록한다. 엔진 런처 날짜 대신 빌드 결과와 실행 GUID로 최신 여부를 확인했다.
+Windows 실행 검사 전체의 빌드 GUID는 **6305bd1d1d9c485c90bd4c7e4aeef363**이며 런타임 오류는 모두 0이다. 빌드 경고 수와 런타임 오류 수를 구분해 기록한다. 엔진 런처 날짜 대신 빌드 결과와 실행 GUID로 최신 여부를 확인했다.
 
 ## 주민 모델과 작업
 
@@ -44,14 +44,14 @@ UI 검사는 실제 EventSystem 입력으로 도구 분류 전환, 선택 창·�
 
 ## 재현
 
-Windows 배포 ZIP은 39,737,187바이트, 선택형 게이트웨이 ZIP은 19,270바이트다. Windows ZIP의 필수 파일 26개·전체 엔트리 179개와 SHA-256이 검증기를 통과했다. 새 폴더에 압축을 풀어 핵심 DLL·Unity 데이터가 빌드 원본과 같은지 대조하고, 같은 빌드 GUID로 주민 실행 검사 306개가 오류 0·종료 0으로 다시 통과했다.
+v0.6.1은 가까운 줌에서 수동 이동·반복 확대·Feel 반응이 같은 줌 범위를 사용하는지 확인하는 추가 회귀 검사 6개를 포함한다.
 
 ~~~powershell
 .\Tools\Build.ps1
 .\Tools\Test.ps1 -Runtime -FactoryRuntime -CompactUiRuntime -FeelRuntime -TutorialRuntime -ResidentActivityRuntime
 npm test --prefix Server
-.\Tools\Package-Release.ps1 -Version 0.6.0 -PreviewPath .\Docs\Images\riverworks-v0.6.png
-.\Tools\Verify-Release.ps1 -ZipPath .\Builds\Riverworks-v0.6.0-Windows-x64.zip
+.\Tools\Package-Release.ps1 -Version 0.6.1 -PreviewPath .\Docs\Images\riverworks-v0.6.png
+.\Tools\Verify-Release.ps1 -ZipPath .\Builds\Riverworks-v0.6.1-Windows-x64.zip
 ~~~
 
 상용 Feel 원본은 공개 소스에서 제외한다. 재빌드하려는 개발자는 [Feel 설치 안내](FEEL_SETUP.ko.md)를 따른다. 배포는 [릴리스 절차](RELEASE_PROCESS.ko.md)에 따라 새 폴더에 압축 해제한 실행 파일과 SHA-256을 확인한 뒤 진행한다. 로그·테스트 저장·실제 키·실행 상태는 배포에 포함하지 않는다.

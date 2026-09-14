@@ -14,8 +14,8 @@ namespace Riverworks
 
         const float ManualSuppressionSeconds = 3f;
         const float LowPriorityPulseInterval = 1.2f;
-        const float MinimumSize = 2.8f;
-        const float MaximumSize = 17.5f;
+        const float MinimumSize = OrbitCamera.MinimumZoom;
+        const float MaximumSize = OrbitCamera.MaximumZoom;
 
         OrbitCamera orbit;
         Transform poseData;
