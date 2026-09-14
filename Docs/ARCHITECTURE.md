@@ -8,7 +8,7 @@ RIVERWORKS v0.6은 Unity 6000.5.5f1 기반 단일 플레이어 공유 도시 프
 
 주민의 기본 일과와 단우 안내는 로컬 규칙으로 동작합니다. 별도의 `ResidentAiClient`와 `Server/` 게이트웨이는 OpenRouter 모델이 제안한 제한된 방문 계획을 선택적으로 적용합니다. 모델이 건설·경제·생산 상태를 직접 바꾸는 API는 없으며, 연결되지 않았거나 검증에 실패하면 `CitizenSimulation`의 기존 일과를 계속 사용합니다.
 
-현재 v0.6 Windows 빌드와 도시·통합 물류·컴팩트 UI·튜토리얼·Feel·주민 AI 계약 런타임 검사의 GUID는 `6305bd1d1d9c485c90bd4c7e4aeef363`입니다. 주민 AI 검사는 실제 제공자 호출이 없는 `MOCK_CONTRACT`이고, 유효한 OpenRouter 키가 없어 `LIVE_OPENROUTER`는 실행하지 못했습니다. v0.6 Android APK 생성과 실제 기기 설치·터치·성능도 아직 완료되지 않았습니다. 세부 결과는 [검증 기록](VERIFICATION.md)에 있습니다.
+현재 v0.6 Windows 빌드와 도시·통합 물류·컴팩트 UI·튜토리얼·Feel·주민 AI 계약 런타임 검사의 GUID는 `6438d35a7cc847fe83ab317eef8dd5a7`입니다. 주민 AI 검사는 실제 제공자 호출이 없는 `MOCK_CONTRACT`이고, 유효한 OpenRouter 키가 없어 `LIVE_OPENROUTER`는 실행하지 못했습니다. v0.6 Android APK 생성과 실제 기기 설치·터치·성능도 아직 완료되지 않았습니다. 세부 결과는 [검증 기록](VERIFICATION.md)에 있습니다.
 
 ## 실행 객체 그래프
 
@@ -230,7 +230,7 @@ CanExport(FactoryEntity)
 - 설비 창고·반입 부두에 도시 재고 10개 투입
 - 닫기
 
-모달 상태는 `GameController.ModalOpen`과 HUD의 로컬 `factoryModalOpen`을 함께 사용해 연구·새 도시·모바일 교역 모달과 겹치지 않게 합니다. 파일로 남아 있는 `FactoryHud`는 `GameController`가 생성하거나 활성화하지 않습니다.
+모달 상태는 `GameController.ModalOpen`과 HUD의 로컬 `factoryModalOpen`을 함께 사용해 연구·새 도시·모바일 교역 모달과 겹치지 않게 합니다. 사용하지 않던 독립 공장 HUD는 삭제했으며, 공장 UI도 `Hud.cs`와 `Hud.Modals.cs`에 통합되어 있습니다.
 
 ### 모바일 입력
 
@@ -347,21 +347,21 @@ dotnet run --project .\Tests\Riverworks.Tests.csproj -c Release
 
 `CityLogisticsChecks`와 `CityFactoryChecks`는 42×42 기하, 양방향 점유, 도로·벨트 공존, 도시 바위, 물 교량, 생산·가공 버퍼, 시청·도시 창고·시장 인계, 역압, 전력·반출 연결과 v3→v4 보존을 다룹니다. `SharedCityScenario`와 `SharedCitySmokeTest`는 Unity 런타임에서 단일 보드·카메라·HUD·주민 유지, 실제 이동 화물과 저장 왕복을 검사합니다.
 
-현재 기록된 v0.6 결과는 다음과 같습니다.
+현재 기록된 v0.6.2 결과는 다음과 같습니다.
 
 | 검증 계층 | 결과 |
 |---|---:|
 | 순수 C# 코어 | 695개 PASS |
-| `RuntimeSmokeTest` 도시 | 59개 PASS |
+| `RuntimeSmokeTest` 도시 | 61개 PASS |
 | `SharedCitySmokeTest` | 106개 PASS |
-| `CompactHudSmokeTest` | 248개 PASS |
-| `TutorialSmokeTest` | 886개 PASS |
-| `FeelSmokeTest` | 174개 PASS |
-| `ResidentAiSmokeTest` | 77개 PASS, `MOCK_CONTRACT`, 실제 제공자 호출 없음 |
+| `CompactHudSmokeTest` | 779개 PASS |
+| `TutorialSmokeTest` | 2,465개 PASS |
+| `FeelSmokeTest` | 180개 PASS |
+| `ResidentAiSmokeTest` | 160개 PASS, `MOCK_CONTRACT`, 실제 제공자 호출 없음 |
 
-모든 Windows 런타임 결과는 빌드 GUID `6305bd1d1d9c485c90bd4c7e4aeef363`에서 오류 없이 종료됐습니다. `FeelSmokeTest`는 실제 `MMF_Player`, 시청 근접 줌, 수동 카메라 취소와 기준 변환 복원을 포함하고, `TutorialSmokeTest`는 11단계·19개 기능 안내, 실제 단우 도로 이동, 카메라 추적, 초상화 부재와 저장 경계를 포함합니다.
+모든 Windows 런타임 결과는 빌드 GUID `6438d35a7cc847fe83ab317eef8dd5a7`에서 오류 없이 종료됐습니다. `FeelSmokeTest`는 실제 `MMF_Player`, 시청 근접 줌, 수동 카메라 취소와 기준 변환 복원을 포함하고, `TutorialSmokeTest`는 11단계·19개 기능 안내, 실제 단우 도로 이동, 카메라 추적, 초상화 부재와 저장 경계를 포함합니다.
 
-순수 테스트와 Windows 런타임 통과는 Android 또는 외부 제공자 검증을 뜻하지 않습니다. v0.6 Android APK 생성·서명·구성 검사와 실제 기기 설치·터치·성능은 아직 완료되지 않았습니다. 주민 AI도 로컬 계약 서버까지만 확인했으며 실제 `LIVE_OPENROUTER` 호출은 키 부재로 미검증입니다. 최신 [검증 기록](VERIFICATION.md)의 실제 산출물 보고를 기준으로 상태를 판단해야 합니다.
+순수 테스트와 Windows 런타임 통과는 Android 또는 외부 제공자 검증을 뜻하지 않습니다. v0.6 Android APK 생성·서명·구성 검사와 실제 기기 설치·터치·성능은 아직 완료되지 않았습니다. 주민 AI도 로컬 계약 서버까지만 확인했으며 실제 `LIVE_OPENROUTER` 호출은 이번 검사에서 실행하지 않았습니다. 최신 [검증 기록](VERIFICATION.md)의 실제 산출물 보고를 기준으로 상태를 판단해야 합니다.
 
 ## 현재 범위
 

@@ -1,22 +1,22 @@
-# RIVERWORKS v0.6.1 Windows 검증 기록
+# RIVERWORKS v0.6.2 Windows 검증 기록
 
 검증일: 2026-09-14. Unity 6000.5.5f1. 저장 형식은 v4를 유지한다.
 
 | 범위 | 결과 | 근거 |
 |---|---|---|
-| 도시·기술·물류·주민 핵심 검사 | 695개 통과 | Artifacts/v061-tests.log |
+| 도시·기술·물류·주민 핵심 검사 | 695개 통과 | Artifacts/UiPolish/final-tests.log |
 | Unity 저장·복원·이전 버전 호환 | 64개 통과 | Artifacts/save-validation-results.txt |
-| Windows x64 빌드 | 오류 0, 경고 30, 107,960,691바이트 | Artifacts/build-result.txt |
-| 도시 실행 | 59개 통과 | Artifacts/Smoke/runtime-results.txt |
+| Windows x64 빌드 | 오류 0, 경고 30, 108,025,523바이트 | Artifacts/build-result.txt |
+| 도시 실행 | 61개 통과 | Artifacts/Smoke/runtime-results.txt |
 | 같은 도시의 물류 실행 | 106개 통과 | Artifacts/SharedCitySmoke/shared-city-results.txt |
-| 컴팩트 UI 실행 | 248개 통과 | Artifacts/CompactUiSmoke/compact-ui-results.txt |
+| 컴팩트 UI 실행 | 779개 통과 | Artifacts/CompactUiSmoke/compact-ui-results.txt |
 | Feel 연출·카메라 | 180개 통과 | Artifacts/FeelSmoke/feel-results.txt |
-| 단우·기본/후속 튜토리얼 | 886개 통과 | Artifacts/TutorialSmoke/tutorial-results.txt |
+| 단우·기본/후속 튜토리얼 | 2,465개 통과 | Artifacts/TutorialSmoke/tutorial-results.txt |
 | 주민 모델·건물별 작업 | 306개 통과 | Artifacts/ResidentActivitySmoke/resident-activity-results.txt |
-| 주민 AI HTTP 계약 | 77개 통과, MOCK_CONTRACT | Artifacts/ResidentAiSmoke/resident-ai-results.txt |
-| Node 게이트웨이 fixture 검사 | 22개 통과 | Artifacts/resident-release-server-tests.log |
+| 주민 AI HTTP 계약·UI | 160개 통과, MOCK_CONTRACT | Artifacts/ResidentAiSmoke/resident-ai-results.txt |
+| Node 게이트웨이 fixture 검사 | 22개 통과 | Artifacts/UiPolish/server-test.log |
 
-Windows 실행 검사 전체의 빌드 GUID는 **6305bd1d1d9c485c90bd4c7e4aeef363**이며 런타임 오류는 모두 0이다. 빌드 경고 수와 런타임 오류 수를 구분해 기록한다. 엔진 런처 날짜 대신 빌드 결과와 실행 GUID로 최신 여부를 확인했다.
+Windows 실행 검사 전체의 빌드 GUID는 **6438d35a7cc847fe83ab317eef8dd5a7**이며 런타임 오류는 모두 0이다. 빌드 경고 수와 런타임 오류 수를 구분해 기록한다. 엔진 런처 날짜 대신 빌드 결과와 실행 GUID로 최신 여부를 확인했다.
 
 ## 주민 모델과 작업
 
@@ -34,7 +34,16 @@ overview와 6개 작업 클로즈업, 관절 변화가 확인되는 24프레임�
 
 도시·통합 물류 검사는 18개 연구와 시대 진행, 주민 보행·선택·정지, 농장과 벌목장의 출고 버퍼, 투입기·벨트·조립기·도시 창고 인계, 원료 보존과 저장 복원을 포함한다. 물류는 실제 운송 중 도시 재고에 중복 반영되지 않는다.
 
-UI 검사는 실제 EventSystem 입력으로 도구 분류 전환, 선택 창·모달·연구·설비 구성과 월드 입력 복원을 확인한다. 1600×900과 1280×720에서 기본 화면의 UI 차단 지점은 168/960(17.50%), 선택 화면은 240/960(25.00%)이다. 화면당 40×24개 지점의 실제 입력 차단 검사이며 Android 기기 측정이 아니다.
+UI 검사는 실제 EventSystem 입력으로 여섯 분류 전환, 선택 창·모달·연구·설비 구성과 월드 입력 복원을 확인한다. 1600×900, 1280×720, 1024×768, 2048×1536을 정확한 RenderTexture로 렌더링해 글자 폭·높이, 스크롤 마스크, 버튼과 닫기 접근성을 검사했다. 물리 모니터나 Android 실기기 크기의 증거로 사용하지 않는다.
+
+| 렌더 크기 | 기본 화면 차단 | 선택 화면 차단 |
+|---|---|---|
+| 1600×900 | 126/960 · 13.13% | 161/960 · 16.77% |
+| 1280×720 | 168/960 · 17.50% | 231/960 · 24.06% |
+| 1024×768 | 170/960 · 17.71% | 236/960 · 24.58% |
+| 2048×1536 | 85/960 · 8.85% | 103/960 · 10.73% |
+
+기본 화면 20%, 선택 화면 30% 기준을 모두 만족한다. 일반 상태 캡처는 등장 연출 뒤에 저장하며, 전후 각 40장의 PNG 크기도 파일 헤더로 확인했다. 단우의 기본 대사 11개·기능 안내 19개 전체 페이지와 기능 목록 19개 항목을 네 크기에서 확인했다. 주민 AI에는 640×360의 작은 논리 화면에서 고정 헤더·세로 스크롤·하단 버튼 접근 검사도 추가했다. 자세한 변경은 [UI 다듬기](UI_POLISH.ko.md)에 있다.
 
 ## 외부 AI와 Android의 경계
 
@@ -44,14 +53,23 @@ UI 검사는 실제 EventSystem 입력으로 도구 분류 전환, 선택 창·�
 
 ## 재현
 
-v0.6.1은 가까운 줌에서 수동 이동·반복 확대·Feel 반응이 같은 줌 범위를 사용하는지 확인하는 추가 회귀 검사 6개를 포함한다.
+v0.6.1에서 추가한 근거리 줌 회귀 검사 6개를 유지한다. v0.6.2는 UI와 관련 검사만 변경하며, 빌드가 재생성한 주민 프리팹 5개와 시각 라이브러리는 기존 파일과 모든 의미 있는 직렬화 속성이 같은지 비교한 뒤 소스 변경에서 제외했다.
 
 ~~~powershell
 .\Tools\Build.ps1
 .\Tools\Test.ps1 -Runtime -FactoryRuntime -CompactUiRuntime -FeelRuntime -TutorialRuntime -ResidentActivityRuntime
 npm test --prefix Server
-.\Tools\Package-Release.ps1 -Version 0.6.1 -PreviewPath .\Docs\Images\riverworks-v0.6.png
-.\Tools\Verify-Release.ps1 -ZipPath .\Builds\Riverworks-v0.6.1-Windows-x64.zip
+.\Tools\Package-Release.ps1 -Version 0.6.2 -PreviewPath .\Docs\Images\riverworks-v0.6.png -MoviePath .\Artifacts\UiPolish\ui-polish.mp4
+.\Tools\Verify-Release.ps1 -ZipPath .\Builds\Riverworks-v0.6.2-Windows-x64.zip
 ~~~
 
 상용 Feel 원본은 공개 소스에서 제외한다. 재빌드하려는 개발자는 [Feel 설치 안내](FEEL_SETUP.ko.md)를 따른다. 배포는 [릴리스 절차](RELEASE_PROCESS.ko.md)에 따라 새 폴더에 압축 해제한 실행 파일과 SHA-256을 확인한 뒤 진행한다. 로그·테스트 저장·실제 키·실행 상태는 배포에 포함하지 않는다.
+
+## v0.6.2 배포 패키지
+
+Windows ZIP은 39,867,393바이트이며 필수 파일 29개·전체 엔트리 182개와 SHA-256 검사를 통과했다. 새 폴더에 압축을 풀어 코드 DLL·리소스·Player 설정의 바이트 일치를 확인한 뒤 같은 GUID의 UI 검사 779개를 다시 통과했다. 선택형 게이트웨이 ZIP은 19,820바이트다.
+
+- Windows SHA-256: `ea5c64eb07c95e628779d0784244774d3ed19ef2627c5f06345e04bcb35fe0be`
+- Gateway SHA-256: `2eae494d5e33b4a74e59398b338f7652928e87cb1438bee7602df1193f9765f5`
+
+6초·1280×720 미리보기는 이번 실행의 인트로·타이핑·주민 작업 72프레임으로 만들었다. 공개 소스의 텍스트 파일 305개에서 비밀값·개인 사용자 경로를 검사했고, 빌드·캐시·실제 설정·Feel 원본의 금지 경로가 추적되지 않는지 확인했다.

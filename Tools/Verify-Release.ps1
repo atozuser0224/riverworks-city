@@ -9,7 +9,7 @@ param(
     [string]$Sha256Path,
 
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$ExpectedVersion = '0.6.1',
+    [string]$ExpectedVersion = '0.6.2',
 
     [Alias('AndroidApkPath')]
     [string]$ApkPath
@@ -138,6 +138,9 @@ function Assert-ReleaseZip {
                 'TUTORIAL_GUIDE.ko.md', 'RESIDENT_AI.ko.md', 'PIXEL_FONT.md',
                 'Galmuri-OFL.txt', 'Galmuri-ATTRIBUTION.md'
             )
+        }
+        if ([Version]$Version -ge [Version]'0.6.2') {
+            $requiredPaths += @('UI_POLISH.ko.md', 'Images/research-v0.6.2.png', 'Images/guidance-v0.6.2.png')
         }
         $requiredEntries = @{}
         foreach ($relativePath in $requiredPaths) {
