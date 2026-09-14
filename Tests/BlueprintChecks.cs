@@ -32,10 +32,10 @@ public static class BlueprintChecks
     {
         FactoryState state = FactoryBlueprints.Create(index);
         FactorySimulation.ValidateState(state);
-        True(state.Version == 1 && state.Width == 24 && state.Height == 16 && state.PowerBudget == 20,
+        True(state.Version == 3 && state.Width == 24 && state.Height == 16 && state.PowerBudget == 20,
             $"{FactoryBlueprints.Name(index)} 스키마와 전력 예산");
         True(NoOverlap(state), $"{FactoryBlueprints.Name(index)} 설비 겹침 없음");
-        True(state.Entities.All(entity => entity.Input.Count == 9 && entity.Output.Count == 9 &&
+        True(state.Entities.All(entity => entity.Input.Count == ResourceCatalog.Count && entity.Output.Count == ResourceCatalog.Count &&
             entity.Input[0] == 0 && entity.Output[0] == 0), $"{FactoryBlueprints.Name(index)} 고정 길이 물자 목록");
         True(state.Produced.Sum() == 0 && state.Exported.Sum() == 0 && state.Recovered.Sum() == 0 &&
             state.Entities.All(entity => entity.Output.Sum() == 0 && entity.CargoResource == Resource.Coins &&

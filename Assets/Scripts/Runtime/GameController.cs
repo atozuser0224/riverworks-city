@@ -25,13 +25,16 @@ namespace Riverworks
         public OrbitCamera CameraRig { get; private set; }
         public CitizenView Citizens { get; private set; }
         public FactoryController Factory { get; private set; }
+        public CityProjectView ProjectView { get; private set; }
+        public CityProjectKind ProjectSiteTool { get; private set; }
+        public bool ProjectToolActive => ProjectSiteTool!=CityProjectKind.None;
         public FeelDirector Feel { get; private set; }
         public TutorialDirector Tutorial { get; private set; }
         public ResidentAiClient ResidentAi { get; private set; }
         Hud cityHud;
         public Hud CityHud => cityHud;
         public FactoryEntity SelectedFactory => Factory!=null?Factory.SelectedEntity:null;
-        public bool FactoryToolActive => Factory!=null&&(Factory.SelectedTool!=FactoryKind.None||Factory.RemovalMode);
+        public bool FactoryToolActive => Factory!=null&&(Factory.SelectedTool!=FactoryKind.None||Factory.RemovalMode||Factory.FoundationMode);
         public string PowerUsageText => (Sim.PowerUsed+(Factory!=null?Factory.Sim.PowerUsed:0)).ToString("0.#");
         public string ResidentDetails => Citizens != null ? Citizens.SelectedDetails : "";
         public int PeopleOnStreet => Citizens != null ? Citizens.VisibleCount : 0;
@@ -68,8 +71,10 @@ namespace Riverworks
             bool residentActivitySmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-resident-activity-smoke")>=0;
             bool compactUiSmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-compact-ui-smoke")>=0;
             bool researchTreeSmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-research-tree-smoke")>=0;
+            bool industrySmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-industry-smoke")>=0;
+            bool expansionSmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-expansion-smoke")>=0;
             bool factorySmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-factory-smoke")>=0 || Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-shared-city-smoke")>=0;
-            SmokeMode = researchTreeSmoke || residentActivitySmoke || residentAiSmoke || tutorialSmoke || feelSmoke || compactUiSmoke || factorySmoke || Array.IndexOf(Environment.GetCommandLineArgs(), "-riverworks-smoke") >= 0;
+            SmokeMode = expansionSmoke || industrySmoke || researchTreeSmoke || residentActivitySmoke || residentAiSmoke || tutorialSmoke || feelSmoke || compactUiSmoke || factorySmoke || Array.IndexOf(Environment.GetCommandLineArgs(), "-riverworks-smoke") >= 0;
             SavePath = SmokeMode ? Path.Combine(Application.persistentDataPath, "smoke-test.json") : Path.Combine(Application.persistentDataPath, "city-v1.json");
             var initial = GameState.CreateNew();
             if (!SmokeMode && (File.Exists(SavePath) || File.Exists(SavePath + ".bak")))
@@ -113,11 +118,14 @@ namespace Riverworks
             Feel.transform.SetParent(transform,false);Feel.Initialize(this);
             cityHud=new GameObject("City interface").AddComponent<Hud>();cityHud.Initialize(this);
             Factory=new GameObject("Physical factory simulation").AddComponent<FactoryController>();Factory.Initialize(this);
+            ProjectView=new GameObject("City construction projects").AddComponent<CityProjectView>();ProjectView.Initialize(this);
             gameObject.AddComponent<MobileInput>().Initialize(this);
             Tutorial=gameObject.AddComponent<TutorialDirector>();Tutorial.Initialize(this);
             ResidentAi=gameObject.AddComponent<ResidentAiClient>();ResidentAi.Initialize(this);
             if(SmokeMode)AudioListener.volume=0f;
-            if(researchTreeSmoke)gameObject.AddComponent<ResearchTreeSmokeTest>().Initialize(this);
+            if(expansionSmoke)gameObject.AddComponent<ExpansionSmokeTest>().Initialize(this);
+            else if(industrySmoke)gameObject.AddComponent<IndustrySmokeTest>().Initialize(this);
+            else if(researchTreeSmoke)gameObject.AddComponent<ResearchTreeSmokeTest>().Initialize(this);
             else if(residentActivitySmoke)gameObject.AddComponent<ResidentActivitySmokeTest>().Initialize(this);
             else if(residentAiSmoke)gameObject.AddComponent<ResidentAiSmokeTest>().Initialize(this);
             else if(tutorialSmoke)gameObject.AddComponent<TutorialSmokeTest>().Initialize(this);
@@ -177,7 +185,7 @@ namespace Riverworks
                 if (ModalOpen) { ModalOpen = false; Changed?.Invoke(); }
                 else if (ResearchOpen) ToggleResearch();
                 else if (HelpOpen) ToggleHelp();
-                else { SelectedTool = BuildingKind.None; DemolitionMode = false; Factory?.Close(); Changed?.Invoke(); }
+                else { CancelProjectSite();SelectedTool = BuildingKind.None; DemolitionMode = false; Factory?.Close(); Changed?.Invoke(); }
                 ClearGestures(); return;
             }
             if (UiTextInputFocused || ModalOpen) { ClearGestures(); return; }
@@ -191,6 +199,8 @@ namespace Riverworks
                 ClearGestures();return;
             }
             if (HelpOpen || ResearchOpen) { ClearGestures(); return; }
+            if(Input.GetKeyDown(KeyCode.PageUp)){Factory.SetFloor(Math.Min(FactoryLayers.MaxFloor,Factory.ActiveFloor+1));ClearGestures();return;}
+            if(Input.GetKeyDown(KeyCode.PageDown)){Factory.SetFloor(Math.Max(0,Factory.ActiveFloor-1));ClearGestures();return;}
             if (Input.GetKeyDown(KeyCode.Space) && !(Tutorial!=null&&Tutorial.ConsumesAdvanceShortcut)) SetSpeed(GameSpeed == 0 ? 1 : 0);
             else if (Input.GetKeyDown(KeyCode.Alpha1)) SetSpeed(0);
             else if (Input.GetKeyDown(KeyCode.Alpha2)) SetSpeed(1);
@@ -208,8 +218,44 @@ namespace Riverworks
             if (Input.GetMouseButtonUp(2)) middleWorldGesture = false;
             if (Input.GetMouseButtonDown(0)) { leftWorldStroke = !overUI; lastPaint = -1; lastFactoryPaint=-1; }
             if (!Input.GetMouseButton(0)) { lastPaint = -1; lastFactoryPaint=-1; leftWorldStroke = false; }
-            if (overUI) { Board.Highlight(null, false); Factory.View.Highlight(-1,-1,false); lastPaint = -1;lastFactoryPaint=-1; return; }
-            if (Input.GetMouseButtonDown(0) && leftWorldStroke && !FactoryToolActive && SelectedTool == BuildingKind.None && !DemolitionMode && Citizens.TrySelect(Input.mousePosition))
+            if (overUI) { Board.Highlight(null, false); Factory.View.Highlight(-1,-1,false);ProjectView?.HidePlacement(); lastPaint = -1;lastFactoryPaint=-1; return; }
+            if(ProjectToolActive)
+            {
+                Board.Highlight(null,false);Factory.View.Highlight(-1,-1,false);
+                if(Physics.Raycast(CameraRig.Camera.ScreenPointToRay(Input.mousePosition),out var projectHit,200f,1<<8))
+                {
+                    var projectTile=projectHit.collider.GetComponent<TileHandle>();
+                    if(projectTile!=null)
+                    {
+                        bool validSite=CityProjects.CanStart(State,ProjectSiteTool,projectTile.X,projectTile.Z,out _);
+                        ProjectView?.ShowPlacement(ProjectSiteTool,projectTile.X,projectTile.Z,validSite);
+                        if(Input.GetMouseButtonDown(0)&&leftWorldStroke)StartProjectAt(projectTile.X,projectTile.Z);
+                    }
+                    else ProjectView?.HidePlacement();
+                }
+                else ProjectView?.HidePlacement();
+                return;
+            }
+            if(FactoryToolActive||Factory.ActiveFloor>0)
+            {
+                Board.Highlight(null,false);
+                if(!Factory.View.TryGetFloorPoint(Input.mousePosition,Factory.ActiveFloor,out var factoryPoint)){Factory.View.Highlight(-1,-1,false);return;}
+                var grid=FactoryController.GridAt(factoryPoint);Factory.HighlightPoint(factoryPoint);
+                int cellIndex=grid.y*Factory.State.Width+grid.x;
+                bool painting=leftWorldStroke&&Factory.SelectedTool==FactoryKind.Belt&&Input.GetMouseButton(0)&&cellIndex!=lastFactoryPaint;
+                if(Input.GetMouseButtonDown(0)&&leftWorldStroke||painting)
+                {
+                    if(painting&&lastFactoryPaint>=0)
+                    {
+                        int fx=lastFactoryPaint%Factory.State.Width,fz=lastFactoryPaint/Factory.State.Width;
+                        while(fx!=grid.x||fz!=grid.y){if(fx!=grid.x)fx+=Math.Sign(grid.x-fx);else fz+=Math.Sign(grid.y-fz);if(Factory.Sim.GetAt(fx,fz,Factory.ActiveFloor)==null)Factory.PlaceAt(fx,fz);}
+                    }
+                    else Factory.PlaceAt(grid.x,grid.y);
+                    lastFactoryPaint=cellIndex;
+                }
+                return;
+            }
+            if (Input.GetMouseButtonDown(0) && leftWorldStroke && SelectedTool == BuildingKind.None && !DemolitionMode && Citizens.TrySelect(Input.mousePosition))
             {
                 SelectedCell = null; Factory?.ClearSelection(); Changed?.Invoke();
                 if(Citizens.IsGuideSelected)Tutorial?.OpenGuide();return;
@@ -218,23 +264,6 @@ namespace Riverworks
             var tile = hit.collider.GetComponent<TileHandle>();
             if (tile == null) return;
             var factoryGrid=FactoryController.GridAt(hit.point);
-            if(FactoryToolActive)
-            {
-                Board.Highlight(null,false);Factory.HighlightPoint(hit.point);
-                int factoryIndex=factoryGrid.y*Factory.State.Width+factoryGrid.x;
-                bool paintFactory=leftWorldStroke&&Factory.SelectedTool==FactoryKind.Belt&&Input.GetMouseButton(0)&&factoryIndex!=lastFactoryPaint;
-                if(Input.GetMouseButtonDown(0)&&leftWorldStroke||paintFactory)
-                {
-                    if(paintFactory&&lastFactoryPaint>=0)
-                    {
-                        int fx=lastFactoryPaint%Factory.State.Width,fz=lastFactoryPaint/Factory.State.Width;
-                        while(fx!=factoryGrid.x||fz!=factoryGrid.y){if(fx!=factoryGrid.x)fx+=Math.Sign(factoryGrid.x-fx);else fz+=Math.Sign(factoryGrid.y-fz);if(Factory.Sim.GetAt(fx,fz)==null)Factory.PlaceAt(fx,fz);}
-                    }
-                    else Factory.PlaceAt(factoryGrid.x,factoryGrid.y);
-                    lastFactoryPaint=factoryIndex;
-                }
-                return;
-            }
             Factory.View.Highlight(-1,-1,false);
             if(Input.GetMouseButtonDown(0)&&SelectedTool==BuildingKind.None&&!DemolitionMode&&Factory.SelectAt(factoryGrid.x,factoryGrid.y))return;
             var cell = Sim.GetCell(tile.X, tile.Z);
@@ -252,7 +281,7 @@ namespace Riverworks
             InteractCell(tile.X, tile.Z);
         }
 
-        void ClearGestures() { leftWorldStroke = rightWorldGesture = middleWorldGesture = false; lastPaint = -1;lastFactoryPaint=-1; Board.Highlight(null, false);Factory?.View?.Highlight(-1,-1,false); }
+        void ClearGestures() { leftWorldStroke = rightWorldGesture = middleWorldGesture = false; lastPaint = -1;lastFactoryPaint=-1; Board.Highlight(null, false);Factory?.View?.Highlight(-1,-1,false);ProjectView?.HidePlacement(); }
         void PaintRoadBetween(int x, int z, int endX, int endZ)
         {
             // An orthogonal staircase fills fast drags without leaving disconnected diagonal roads.
@@ -265,6 +294,8 @@ namespace Riverworks
 
         public void InteractCell(int x, int z)
         {
+            if(ProjectToolActive){StartProjectAt(x,z);return;}
+            if(SelectedTool==BuildingKind.None&&!DemolitionMode&&CityProjects.Occupies(State,x,z)){cityHud.OpenCityProjects();return;}
             Citizens?.ClearSelection();
             Factory?.ClearSelection();
             SelectedCell = Sim.GetCell(x,z);
@@ -285,9 +316,9 @@ namespace Riverworks
             Changed?.Invoke();
         }
 
-        public void SelectTool(BuildingKind kind) { Factory?.Close();SelectedTool = kind; DemolitionMode = false; SelectedCell = null; Citizens?.ClearSelection(); Changed?.Invoke(); sounds?.Play(Soundscape.Cue.Click); }
-        public void SelectDemolish() { Factory?.Close();SelectedTool = BuildingKind.None; DemolitionMode = !DemolitionMode; Citizens?.ClearSelection(); Changed?.Invoke(); }
-        public void ClearCityToolForFactory(){SelectedTool=BuildingKind.None;SelectedCell=null;DemolitionMode=false;Citizens?.ClearSelection();}
+        public void SelectTool(BuildingKind kind) { CancelProjectSite();Factory?.Close();SelectedTool = kind; DemolitionMode = false; SelectedCell = null; Citizens?.ClearSelection(); Changed?.Invoke(); sounds?.Play(Soundscape.Cue.Click); }
+        public void SelectDemolish() { CancelProjectSite();Factory?.Close();SelectedTool = BuildingKind.None; DemolitionMode = !DemolitionMode; Citizens?.ClearSelection(); Changed?.Invoke(); }
+        public void ClearCityToolForFactory(){ProjectSiteTool=CityProjectKind.None;ProjectView?.HidePlacement();SelectedTool=BuildingKind.None;SelectedCell=null;DemolitionMode=false;Citizens?.ClearSelection();}
         public void ClearConstructionTools(){ClearCityToolForFactory();Factory?.CancelTools();}
         public void ClearCitySelection(){SelectedCell=null;Citizens?.ClearSelection();}
         public void NotifyWorldSelection(){Changed?.Invoke();}
@@ -301,7 +332,7 @@ namespace Riverworks
             SetNotice(reason); sounds.Play(success ? Soundscape.Cue.Expand : Soundscape.Cue.Denied); Changed?.Invoke();
             Feel?.Play(success?FeelCue.ResearchStart:FeelCue.Denied,BoardView.Position(10,10));
         }
-        public void RefreshWorld(bool structureChanged) { Board?.Refresh(structureChanged); Citizens?.Refresh();Factory?.NotifyCityChanged(); }
+        public void RefreshWorld(bool structureChanged) { Board?.Refresh(structureChanged); Citizens?.Refresh();Factory?.NotifyCityChanged();ProjectView?.Refresh(); }
         public void OpenFactory(){if(Factory.IsOpen)Factory.Close();else{HelpOpen=false;ResearchOpen=false;ModalOpen=false;Factory.Open(false);}}
         public void SetFactoryDisplay(bool open)
         {
@@ -322,6 +353,13 @@ namespace Riverworks
         public bool InteractScreenPoint(Vector2 position)
         {
             if (IsScreenPointOverUI(position)) return false;
+            if(!ProjectToolActive&&(FactoryToolActive||Factory.ActiveFloor>0))return Factory.InteractScreenPoint(position);
+            if(ProjectToolActive)
+            {
+                if(!Physics.Raycast(CameraRig.Camera.ScreenPointToRay(position),out var projectHit,200f,1<<8))return false;
+                var projectTile=projectHit.collider.GetComponent<TileHandle>();if(projectTile==null)return false;
+                StartProjectAt(projectTile.X,projectTile.Z);return true;
+            }
             if (!FactoryToolActive&&SelectedTool==BuildingKind.None && !DemolitionMode && Citizens!=null && Citizens.TrySelect(position)) { SelectedCell=null; Factory?.ClearSelection(); Changed?.Invoke();if(Citizens.IsGuideSelected)Tutorial?.OpenGuide();return true; }
             if (!Physics.Raycast(CameraRig.Camera.ScreenPointToRay(position), out var hit, 200f, 1 << 8)) return false;
             var tile = hit.collider.GetComponent<TileHandle>(); if (tile == null) return false;
@@ -329,6 +367,35 @@ namespace Riverworks
             if(FactoryToolActive){Factory.PlaceAt(micro.x,micro.y);return true;}
             if(SelectedTool==BuildingKind.None&&!DemolitionMode&&Factory.SelectAt(micro.x,micro.y))return true;
             InteractCell(tile.X,tile.Z); return true;
+        }
+        public void SelectProjectSite(CityProjectKind kind)
+        {
+            var spec=CityProjects.Get(kind);
+            if(spec==null){SetNotice("프로젝트를 선택하세요.");return;}
+            if(!TechCatalog.Has(State,spec.RequiredTech)){SetNotice(TechCatalog.Get(spec.RequiredTech).Name+" 연구가 필요합니다.");return;}
+            cityHud.CloseTransientPanels();Factory?.Close();ClearCityToolForFactory();
+            ProjectSiteTool=kind;HelpOpen=ResearchOpen=ModalOpen=false;
+            SetNotice(spec.Name+" 부지를 선택하세요 · "+spec.Width+"×"+spec.Height+" 도시 칸 · 시작 비용 "+spec.CoinCost+"G");Changed?.Invoke();
+        }
+        public void CancelProjectSite(){ProjectSiteTool=CityProjectKind.None;ProjectView?.HidePlacement();Changed?.Invoke();}
+        public bool StartProjectAt(int x,int z)
+        {
+            if(!ProjectToolActive)return false;
+            bool okay=CityProjects.Start(State,ProjectSiteTool,x,z,out string reason);
+            if(okay){ProjectSiteTool=CityProjectKind.None;ProjectView?.HidePlacement();Sim.Recalculate();RefreshWorld(true);cityHud.OpenCityProjects();}
+            SetNotice(reason);Feel?.Play(okay?FeelCue.Build:FeelCue.Denied,BoardView.Position(x,z));return okay;
+        }
+        public void DeliverProject(CityProjectKind kind)
+        {
+            bool okay=CityProjects.Deliver(State,kind,out string reason);
+            if(okay){Sim.Recalculate();RefreshWorld(true);}
+            SetNotice(reason);
+        }
+        public void CancelProject(CityProjectKind kind)
+        {
+            bool okay=CityProjects.Cancel(State,kind,out string reason);
+            if(okay){Sim.Recalculate();RefreshWorld(true);}
+            SetNotice(reason);
         }
         public void BuyRegion(int id)
         {
@@ -350,11 +417,15 @@ namespace Riverworks
 
         public static int TradePrice(Resource resource)
         {
-            switch(resource) { case Resource.Timber: return 4; case Resource.Stone: return 5; case Resource.Grain: return 3; case Resource.Flour: return 5; case Resource.Bread: return 7; case Resource.Ore: return 5; case Resource.Steel: return 11; case Resource.Tools: return 16; default: return 0; }
+            return ResourceCatalog.Get(resource)?.TradePrice ?? 0;
         }
         public void Trade(Resource resource, bool buy)
         {
-            if (resource == Resource.Coins || !Enum.IsDefined(typeof(Resource), resource)) return;
+            if (!ResourceCatalog.IsTradeable(resource))
+            {
+                SetNotice("이 물자는 교역할 수 없습니다. 공장 공정으로 생산하세요.");
+                return;
+            }
             const int amount = 10;
             int price = TradePrice(resource);
             int index = (int)resource;
@@ -422,7 +493,7 @@ namespace Riverworks
             CloseFactoryForCityStateChange(); SetSimulation(fresh); ResetView(); SetNotice("중세 마을을 시작했습니다. 곡물을 생산하고 T 키로 기술을 연구하세요.");
         }
         void CloseFactoryForCityStateChange() { if (Factory != null && Factory.IsOpen) Factory.Close(); }
-        void ResetView() { SelectedCell = null; SelectedTool = BuildingKind.None; DemolitionMode = false; HelpOpen=false; ResearchOpen=false; ModalOpen=false; clock=State.DayProgressSeconds; autoSaveClock=0; GameSpeed=1; RefreshWorld(true); Citizens?.ClearSelection(); CameraRig.Home(); Changed?.Invoke(); }
+        void ResetView() { ProjectSiteTool=CityProjectKind.None;ProjectView?.HidePlacement();SelectedCell = null; SelectedTool = BuildingKind.None; DemolitionMode = false; HelpOpen=false; ResearchOpen=false; ModalOpen=false; clock=State.DayProgressSeconds; autoSaveClock=0; GameSpeed=1; RefreshWorld(true); Citizens?.ClearSelection(); CameraRig.Home(); Changed?.Invoke(); }
         void OnApplicationQuit() { if (!SmokeMode && Sim != null && allowAutoSave) Save(false); }
         void OnApplicationPause(bool paused){if(paused&&!SmokeMode&&Sim!=null&&allowAutoSave)Save(false);}
     }

@@ -88,7 +88,7 @@ namespace Riverworks
             if(errors.Count>0) {Complete();yield break;}
             try { VerifyResearchScroll(); } catch(Exception e) { Fail(e.ToString()); Complete(); yield break; }
             controller.ToggleResearch();
-            try { VerifyLayout(); } catch(Exception e) { Fail(e.ToString()); Complete(); yield break; }
+            yield return VerifyLayout();
 
             try { PrepareMedievalCitizens(); } catch(Exception e) { Fail(e.ToString()); Complete(); yield break; }
             Screen.SetResolution(1600,900,FullScreenMode.Windowed);
@@ -145,9 +145,11 @@ namespace Riverworks
             Assert(FindObjectsByType<TileHandle>().Length==441,"tile colliders and handles");
             Assert(FindObjectsByType<Canvas>().Length==1,"native HUD canvas");
             Assert(controller.CameraRig.Camera!=null,"isometric camera");
-            VerifyLayout();
+            yield return VerifyLayout();
             var screen=controller.CameraRig.Camera.WorldToScreenPoint(BoardView.Position(10,10));
             Assert(Physics.Raycast(controller.CameraRig.Camera.ScreenPointToRay(screen),out var hit,200,1<<8)&&hit.collider.GetComponent<TileHandle>()?.X==10,"world picking through 3D buildings");
+            PrepareScrollButton("Button_주거");
+            yield return new WaitForEndOfFrame();
             Click("Button_주거");
             yield return new WaitForEndOfFrame();
             Click("Button_주택");
@@ -167,6 +169,11 @@ namespace Riverworks
             float bread=controller.Sim.Get(Resource.Bread);controller.Trade(Resource.Bread,true);
             Assert(controller.Sim.Get(Resource.Bread)==bread+10,"import trade");
             controller.Trade(Resource.Bread,false);Assert(controller.Sim.Get(Resource.Bread)==bread,"export trade");
+            float controlUnits=controller.Sim.Get(Resource.ControlUnit);float tradeCoins=controller.State.Coins;
+            controller.Trade(Resource.ControlUnit,true);
+            Assert(controller.Sim.Get(Resource.ControlUnit)==controlUnits&&Mathf.Approximately(controller.State.Coins,tradeCoins),"non-tradeable high-ID resource import is rejected without free stock or coin mutation");
+            controller.Trade(Resource.ControlUnit,false);
+            Assert(controller.Sim.Get(Resource.ControlUnit)==controlUnits&&Mathf.Approximately(controller.State.Coins,tradeCoins),"non-tradeable high-ID resource export is rejected without stock or coin mutation");
             int regions=controller.State.OwnedRegions.Count;controller.BuyRegion(1);
             Assert(controller.State.OwnedRegions.Count==regions+1,"territory purchase through controller");
             controller.ToggleHelp();Assert(controller.HelpOpen,"help opens");
@@ -176,8 +183,10 @@ namespace Riverworks
         }
         static void Click(string name)
         {
-            var button=FindObjectsByType<Button>(FindObjectsInactive.Include).FirstOrDefault(b=>b.name==name);
+            var button=FindObjectsByType<Button>(FindObjectsInactive.Include).FirstOrDefault(b=>b.name==name&&b.gameObject.activeInHierarchy);
             if(button==null||!button.gameObject.activeInHierarchy||!button.interactable) throw new Exception("UI button unavailable: "+name);
+            ScrollRect containingScroll=ContainingScroll(button.transform as RectTransform);
+            if(containingScroll!=null)BringIntoView(containingScroll,button.transform as RectTransform);
             Canvas.ForceUpdateCanvases();
             var rect=(RectTransform)button.transform;
             Vector3[] corners=new Vector3[4];rect.GetWorldCorners(corners);
@@ -191,7 +200,11 @@ namespace Riverworks
         }
         static void AssertFirstHit(string name)
         {
-            var button=FindObjectsByType<Button>(FindObjectsInactive.Include).FirstOrDefault(b=>b.name==name);
+            AssertFirstHit(FindObjectsByType<Button>(FindObjectsInactive.Include).FirstOrDefault(b=>b.name==name&&b.gameObject.activeInHierarchy));
+        }
+        static void AssertFirstHit(Button button)
+        {
+            string name=button==null?"missing active button":button.name;
             if(button==null||!button.gameObject.activeInHierarchy)throw new Exception("UI button unavailable for hit test: "+name);
             Canvas.ForceUpdateCanvases();var rect=(RectTransform)button.transform;Vector3[] corners=new Vector3[4];rect.GetWorldCorners(corners);
             var center=new Vector2((corners[0].x+corners[2].x)*.5f,(corners[0].y+corners[2].y)*.5f);
@@ -199,7 +212,7 @@ namespace Riverworks
             var pointer=new PointerEventData(EventSystem.current){position=center,button=PointerEventData.InputButton.Left};var hits=new List<RaycastResult>();EventSystem.current.RaycastAll(pointer,hits);
             if(hits.Count==0||!(hits[0].gameObject==button.gameObject||hits[0].gameObject.transform.IsChildOf(button.transform)))throw new Exception("UI button is not the first raycast target: "+name+(hits.Count==0?" no hits":" hit="+hits[0].gameObject.name));
         }
-        void VerifyLayout()
+        IEnumerator VerifyLayout()
         {
             var hud=FindAnyObjectByType<Hud>();
             Assert(hud!=null,"HUD exists for layout validation");
@@ -207,18 +220,76 @@ namespace Riverworks
             AssertFirstHit("Button_Factory");
             foreach(string categoryButton in new[]{"Button_주거","Button_생산","Button_산업","Button_도시","Button_Factory","Button_물류"})
             {
+                PrepareScrollButton(categoryButton);
+                yield return new WaitForEndOfFrame();
                 Click(categoryButton);Canvas.ForceUpdateCanvases();
+                yield return new WaitForEndOfFrame();
                 if(!hud.VerifyLayout(out reason)) throw new Exception("Category layout invalid: "+categoryButton+" "+reason);
                 foreach(var button in FindObjectsByType<Button>())
                 {
                     if(!button.gameObject.activeInHierarchy)continue;
-                    var rect=(RectTransform)button.transform;var corners=new Vector3[4];rect.GetWorldCorners(corners);
-                    if(rect.rect.width<=0||rect.rect.height<=0||corners[0].x<-.5f||corners[0].y<-.5f||corners[2].x>Screen.width+.5f||corners[2].y>Screen.height+.5f)throw new Exception("Visible button bounds invalid: "+button.name);
+                    var rect=(RectTransform)button.transform;
+                    if(rect.rect.width<=0||rect.rect.height<=0)throw new Exception("Active button has invalid geometry: "+button.name);
+                    ScrollRect scroll=ContainingScroll(rect);
+                    if(scroll!=null)
+                    {
+                        BringIntoView(scroll,rect);
+                        yield return new WaitForEndOfFrame();
+                        if(!FullyInside(scroll.viewport,rect,.75f))throw new Exception("Scrollable button cannot be brought fully inside its viewport: "+button.name+" viewport="+scroll.viewport.name);
+                        AssertFirstHit(button);
+                    }
+                    else
+                    {
+                        var corners=new Vector3[4];rect.GetWorldCorners(corners);
+                        if(corners[0].x<-.5f||corners[0].y<-.5f||corners[2].x>Screen.width+.5f||corners[2].y>Screen.height+.5f)throw new Exception("Visible non-scroll button bounds invalid: "+button.name);
+                    }
                 }
             }
+            PrepareScrollButton("Button_생산");
+            yield return new WaitForEndOfFrame();
             Click("Button_생산");
             AssertFirstHit("Button_Factory");
-            Assert(true,"all six build categories and the factory action fit at "+Screen.width+"x"+Screen.height);
+            Assert(true,"all six build categories fit and every active scroll-child button can be scrolled fully into its viewport and reached as the first raycast target at "+Screen.width+"x"+Screen.height);
+        }
+        static ScrollRect ContainingScroll(RectTransform target)
+        {
+            for(Transform current=target.parent;current!=null;current=current.parent)
+            {
+                ScrollRect scroll=current.GetComponent<ScrollRect>();
+                if(scroll!=null&&scroll.gameObject.activeInHierarchy&&scroll.viewport!=null&&scroll.content!=null&&target.IsChildOf(scroll.content))return scroll;
+            }
+            return null;
+        }
+        static void PrepareScrollButton(string name)
+        {
+            Button button=FindObjectsByType<Button>(FindObjectsInactive.Include).FirstOrDefault(value=>value.name==name&&value.gameObject.activeInHierarchy);
+            if(button==null||!button.gameObject.activeInHierarchy)throw new Exception("UI button unavailable for scroll preparation: "+name);
+            RectTransform rect=button.transform as RectTransform;
+            ScrollRect scroll=ContainingScroll(rect);
+            if(scroll!=null)BringIntoView(scroll,rect);
+        }
+        static void BringIntoView(ScrollRect scroll,RectTransform target)
+        {
+            scroll.StopMovement();
+            for(int pass=0;pass<3;pass++)
+            {
+                Canvas.ForceUpdateCanvases();
+                Bounds bounds=RectTransformUtility.CalculateRelativeRectTransformBounds(scroll.viewport,target);
+                Rect view=scroll.viewport.rect;
+                float dx=bounds.min.x<view.xMin?view.xMin-bounds.min.x:bounds.max.x>view.xMax?view.xMax-bounds.max.x:0f;
+                float dy=bounds.min.y<view.yMin?view.yMin-bounds.min.y:bounds.max.y>view.yMax?view.yMax-bounds.max.y:0f;
+                if(Mathf.Abs(dx)<.1f&&Mathf.Abs(dy)<.1f)break;
+                scroll.content.anchoredPosition+=new Vector2(scroll.horizontal?dx:0f,scroll.vertical?dy:0f);
+            }
+            Canvas.ForceUpdateCanvases();
+        }
+        static bool FullyInside(RectTransform viewport,RectTransform target,float tolerance)
+        {
+            if(viewport==null||target==null)return false;
+            Bounds bounds=RectTransformUtility.CalculateRelativeRectTransformBounds(viewport,target);
+            Rect view=viewport.rect;
+            return bounds.min.x>=view.xMin-tolerance&&bounds.max.x<=view.xMax+tolerance&&
+                   bounds.min.y>=view.yMin-tolerance&&bounds.max.y<=view.yMax+tolerance;
         }
         void VerifyResearchCatalog()
         {
@@ -229,9 +300,10 @@ namespace Riverworks
             ResearchTreeView tree=controller.CityHud.ResearchTree;
             Assert(tree!=null && tree.Graph!=null && tree.Layout!=null && tree.Details!=null,"research tree exposes its graph, layout, and detail panel");
             Assert(tree.TreeScroll!=null && tree.TreeScroll.horizontal && tree.TreeScroll.vertical && tree.TreeScroll.viewport==tree.GraphViewport && tree.TreeScroll.content==tree.GraphContent && tree.GraphViewport.name=="ResearchGraphViewport" && tree.GraphContent.name=="ResearchGraphContent","research tree uses one global two-dimensional graph viewport");
-            Assert(tree.Nodes.Count==18 && specs.All(spec=>tree.NodeFor(spec.Id)!=null && tree.NodeFor(spec.Id).name=="ResearchNode_"+spec.Id),"research tree renders all 18 selectable graph nodes");
+            Assert(tree.Nodes.Count==specs.Length && specs.All(spec=>tree.NodeFor(spec.Id)!=null && tree.NodeFor(spec.Id).name=="ResearchNode_"+spec.Id),"research tree renders all "+specs.Length+" selectable graph nodes");
             Assert(specs.All(spec=>tree.StartButtonFor(spec.Id)!=null && tree.StartButtonFor(spec.Id).name=="Button_연구 시작_"+spec.Id),"research tree retains one stable start button for every technology");
-            Assert(tree.Graph.Edges.Count==19 && tree.Connections.Count==19 && tree.Graph.Edges.All(edge=>tree.Connections.ContainsKey(edge)),"research tree renders all 19 prerequisite connections");
+            Assert(tree.Graph.Edges.Count==35 && tree.Connections.Count==tree.Graph.Edges.Count && tree.Graph.Edges.All(edge=>tree.Connections.ContainsKey(edge)),"research tree renders all 35 prerequisite connections");
+            Assert(specs.Max(spec=>tree.Graph.Depth(spec.Id))==11,"research graph retains twelve columns with a zero-based maximum depth of 11");
             Assert(tree.VerifyLayout(out var reason),"global research graph layout is valid: "+reason);
             Assert(tree.Layout.ContentSize.x>tree.GraphViewport.rect.width || tree.Layout.ContentSize.y>tree.GraphViewport.rect.height,"global research graph extends beyond its viewport");
             foreach(TechSpec spec in specs)
@@ -258,7 +330,7 @@ namespace Riverworks
             Canvas.ForceUpdateCanvases();
             AssertFirstHit("ResearchNode_Stonecraft");
             AssertFirstHit("ResearchNode_CropRotation");
-            Assert(true,"global research graph focus reaches all 18 technologies and reset reveals both roots at "+Screen.width+"x"+Screen.height);
+            Assert(true,"global research graph focus reaches all "+TechCatalog.All.Count()+" technologies and reset reveals both roots at "+Screen.width+"x"+Screen.height);
         }
         static Button FindButton(string name) => FindObjectsByType<Button>(FindObjectsInactive.Include).FirstOrDefault(button=>button.name==name);
         IEnumerator Capture(string name,string mustDifferFrom)
@@ -316,11 +388,30 @@ namespace Riverworks
         void VerifyCompletedEraSave()
         {
             int technologyCount=TechCatalog.All.Count();
-            string durable=DurableJson(controller.State);controller.SaveGame();
+            string durable=DurableJson(controller.State);
+            Assert(controller.SaveGame(),"Industrial city saves successfully");
+            Assert(SaveStore.TryLoad(controller.SavePath,out GameState stored,out string saveError),"Industrial saved file reloads directly: "+saveError);
+            AssertDurableEqual(durable,DurableJson(stored),"industrial-file-roundtrip","Industrial file preserves every durable field before runtime rebinding");
             controller.State.Technologies.Clear();controller.State.Era=Era.Medieval;controller.State.ResearchPoints=0;
             controller.LoadGame();
             Assert(controller.State.Era==Era.Industrial && controller.State.Technologies.Count==technologyCount && TechCatalog.All.All(t=>TechCatalog.Has(controller.State,t.Id)),"save reload preserves all "+technologyCount+" completed technologies and Industrial era");
-            Assert(DurableJson(controller.State)==durable,"Industrial native save reload preserves all durable state");
+            int currentBudget=Math.Max(0,controller.Sim.PowerCapacity-controller.Sim.PowerUsed);
+            Assert(controller.State.Factory.PowerBudget==currentBudget,"loading rebinds the factory budget to the current city power calculation");
+            // The city's available-power cache is recomputed by FactoryController.Configure.
+            // File round-trip above remains exact; only that derived value is normalized here.
+            stored.Factory.PowerBudget=currentBudget;
+            AssertDurableEqual(DurableJson(stored),DurableJson(controller.State),"industrial-runtime-rebind","Industrial native load preserves all durable state while recomputing only the city factory power budget");
+        }
+        void AssertDurableEqual(string expected,string actual,string artifactName,string label)
+        {
+            if(expected!=actual)
+            {
+                File.WriteAllText(Path.Combine(output,artifactName+"-expected.json"),expected);
+                File.WriteAllText(Path.Combine(output,artifactName+"-actual.json"),actual);
+                int mismatch=0;while(mismatch<expected.Length&&mismatch<actual.Length&&expected[mismatch]==actual[mismatch])mismatch++;
+                checks.Add("DIAGNOSTIC "+artifactName+" first mismatch "+mismatch+"; isolated JSON snapshots written");
+            }
+            Assert(expected==actual,label);
         }
         void PrepareMedievalCitizens()
         {

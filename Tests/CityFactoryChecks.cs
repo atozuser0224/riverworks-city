@@ -73,7 +73,19 @@ public static class CityFactoryChecks
             [FactoryKind.ExportDock] = TechId.Guilds,
             [FactoryKind.PowerInlet] = TechId.SteamPower,
             [FactoryKind.Pole] = TechId.SteamPower,
-            [FactoryKind.Splitter] = TechId.MechanicalPower
+            [FactoryKind.Splitter] = TechId.MechanicalPower,
+            [FactoryKind.Pipe] = TechId.FluidHandling,
+            [FactoryKind.PipeJunction] = TechId.FluidHandling,
+            [FactoryKind.FluidTank] = TechId.FluidHandling,
+            [FactoryKind.WaterPump] = TechId.FluidHandling,
+            [FactoryKind.OilPump] = TechId.OilRefining,
+            [FactoryKind.Foundry] = TechId.MetallurgicalEfficiency,
+            [FactoryKind.MachiningBench] = TechId.Toolmaking,
+            [FactoryKind.Refinery] = TechId.FluidHandling,
+            [FactoryKind.ChemicalPlant] = TechId.Petrochemistry,
+            [FactoryKind.Manufacturer] = TechId.AdvancedManufacturing,
+            [FactoryKind.ItemLift] = TechId.Logistics,
+            [FactoryKind.FluidRiser] = TechId.FluidHandling
         };
 
         List<FactorySpec> specs = FactoryCatalog.All.ToList();
@@ -122,14 +134,14 @@ public static class CityFactoryChecks
 
         new Simulation(state);
 
-        True(state.Version == 4 && ReferenceEquals(state.ArchivedFactory, factory) && !ReferenceEquals(state.Factory, factory) &&
+        True(state.Version == 6 && state.Factory != null && state.Factory.Version == 3 && state.ArchivedFactory != null && state.ArchivedFactory.Version == 3 && ReferenceEquals(state.ArchivedFactory, factory) && !ReferenceEquals(state.Factory, factory) &&
              state.Factory.Width == 42 && state.Factory.Height == 42 &&
              state.Factory.Produced[(int)Resource.Ore] == 4 &&
              state.Factory.Produced[(int)Resource.Steel] == 2 &&
              state.Factory.Produced[(int)Resource.Tools] == 1 &&
              state.Factory.Exported[(int)Resource.Tools] == 1 &&
              Math.Abs(state.Factory.ElapsedSeconds - 42.5f) < .001f,
-            "v3 공장 통계를 보존하고 기존 내부를 보관한 뒤 공유 도시 v4로 이동");
+            "v3 공장 통계를 보존하고 기존 내부를 보관한 뒤 공유 도시 v6로 이동");
     }
 
     static void VersionTwoMigrationCreatesAnEmptyFactory()
@@ -144,12 +156,12 @@ public static class CityFactoryChecks
 
         new Simulation(state);
 
-        True(state.Version == 4 && state.Factory != null && !ReferenceEquals(state.Factory, obsoleteFactory) &&
+        True(state.Version == 6 && state.Factory != null && state.Factory.Version == 3 && !ReferenceEquals(state.Factory, obsoleteFactory) &&
              state.Factory.Width == 42 && state.Factory.Height == 42 && state.ArchivedFactory != null &&
              state.Factory.Entities.Count == 0 && state.Factory.Produced.All(value => value == 0) &&
              state.Factory.Exported.All(value => value == 0) && state.Factory.Recovered.All(value => value == 0) &&
              Math.Abs(state.Factory.ElapsedSeconds) < .001f,
-            "v2 저장은 기존 단계 마이그레이션 후 빈 공유 도시 v4 공장으로 이동");
+            "v2 저장은 기존 단계 마이그레이션 후 빈 공유 도시 v6 공장으로 이동");
     }
 
     static GameState IndustrialEvaluatorFixture()

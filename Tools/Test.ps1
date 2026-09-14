@@ -7,6 +7,8 @@ param(
     [switch]$TutorialRuntime,
     [switch]$ResidentActivityRuntime,
     [switch]$ResearchTreeRuntime,
+    [switch]$IndustryRuntime,
+    [switch]$ExpansionRuntime,
     [string]$ExecutablePath,
     [ValidateRange(1, 3600)]
     [int]$RuntimeTimeoutSeconds = 300
@@ -111,7 +113,7 @@ if ($dotnetExitCode -ne 0) {
     throw "C# 테스트가 종료 코드 ${dotnetExitCode}로 실패했습니다."
 }
 
-if (-not $Runtime -and -not $FactoryRuntime -and -not $CompactUiRuntime -and -not $FeelRuntime -and -not $TutorialRuntime -and -not $ResidentActivityRuntime -and -not $ResearchTreeRuntime) {
+if (-not $Runtime -and -not $FactoryRuntime -and -not $CompactUiRuntime -and -not $FeelRuntime -and -not $TutorialRuntime -and -not $ResidentActivityRuntime -and -not $ResearchTreeRuntime -and -not $IndustryRuntime -and -not $ExpansionRuntime) {
     Write-Host 'C# 테스트 성공. 실행 파일 검증은 -Runtime 또는 -FactoryRuntime을 지정하면 추가로 실행됩니다.'
     return
 }
@@ -129,6 +131,10 @@ $factoryBuildGuid = $null
 $compactUiBuildGuid = $null
 $feelBuildGuid = $null
 $tutorialBuildGuid = $null
+$residentBuildGuid = $null
+$researchBuildGuid = $null
+$industryBuildGuid = $null
+$expansionBuildGuid = $null
 if ($Runtime) {
     $runtimeBuildGuid = Invoke-RuntimeSmoke -Name '도시 런타임' -SmokeFlag '-riverworks-smoke' -OutputDirectory (Join-Path $artifactDirectory 'Smoke') -ResultFileName 'runtime-results.txt' -LogFileName 'runtime.log' -SuccessMarker 'RIVERWORKS_RUNTIME_SMOKE_PASS' -PlayerPath $ExecutablePath -TimeoutSeconds $RuntimeTimeoutSeconds
 }
@@ -177,4 +183,15 @@ if ($ResearchTreeRuntime) {
         if ($otherGuid -and $otherGuid -ne $researchBuildGuid) { throw '연구 지도 검사와 다른 게임 실행 결과의 빌드 GUID가 다릅니다.' }
     }
 }
+if ($IndustryRuntime) {
+    $industryBuildGuid = Invoke-RuntimeSmoke -Name '복합 산업 공정' -SmokeFlag '-riverworks-industry-smoke' -OutputDirectory (Join-Path $artifactDirectory 'IndustrySmoke') -ResultFileName 'industry-results.txt' -LogFileName 'industry-runtime.log' -SuccessMarker 'RIVERWORKS_INDUSTRY_SMOKE_PASS' -PlayerPath $ExecutablePath -TimeoutSeconds $RuntimeTimeoutSeconds
+    foreach ($otherGuid in @($runtimeBuildGuid, $factoryBuildGuid, $compactUiBuildGuid, $feelBuildGuid, $tutorialBuildGuid)) {
+        if ($otherGuid -and $otherGuid -ne $industryBuildGuid) { throw '산업 공정 검사와 다른 게임 실행 결과의 빌드 GUID가 다릅니다.' }
+    }
+}
+if ($ExpansionRuntime) {
+    $expansionBuildGuid = Invoke-RuntimeSmoke -Name '복층 공장과 도시 프로젝트' -SmokeFlag '-riverworks-expansion-smoke' -OutputDirectory (Join-Path $artifactDirectory 'ExpansionSmoke') -ResultFileName 'expansion-results.txt' -LogFileName 'expansion-runtime.log' -SuccessMarker 'RIVERWORKS_EXPANSION_SMOKE_PASS' -PlayerPath $ExecutablePath -TimeoutSeconds $RuntimeTimeoutSeconds
+}
+$verifiedBuildGuids = @(@($runtimeBuildGuid, $factoryBuildGuid, $compactUiBuildGuid, $feelBuildGuid, $tutorialBuildGuid, $residentBuildGuid, $researchBuildGuid, $industryBuildGuid, $expansionBuildGuid) | Where-Object { $_ } | Select-Object -Unique)
+if ($verifiedBuildGuids.Count -ne 1) { throw '요청한 런타임 검사 전체의 빌드 GUID가 일치하지 않습니다.' }
 Write-Host '요청한 모든 테스트가 성공했습니다.'

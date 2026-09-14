@@ -21,6 +21,19 @@ static class Check
             passed += CityFactoryChecks.Run();
             passed += TechnologyGraphChecks.Run();
             passed += ResearchGraphChecks.Run();
+            passed += IndustryCatalogChecks.Run();
+            passed += IndustryProductionChecks.Run();
+            passed += IndustrySaveChecks.Run();
+            passed += IndustryFluidChecks.Run();
+            passed += IndustryChainChecks.Run();
+            passed += IndustrialScenarioChecks.Run();
+            passed += ExpansionCatalogChecks.Run();
+            passed += FactoryLayerChecks.Run();
+            passed += LayerFluidChecks.Run();
+            passed += FactoryAutomationChecks.Run();
+            passed += CityProjectChecks.Run();
+            passed += ExpansionSaveChecks.Run();
+            passed += ExpansionFlowChecks.Run();
             Console.WriteLine($"\n전체 {passed}개 검증 통과"); return 0;
         }
         catch (Exception e) { Console.Error.WriteLine(e); return 1; }
@@ -31,9 +44,9 @@ static class Check
         var s = GameState.CreateNew(); var sim = new Simulation(s);
         Equal(441, s.Cells.Count, "21x21 맵 생성"); True(s.OwnedRegions.SequenceEqual(new[] { 4 }), "중앙 지역 소유");
         True(sim.GetCell(10, 10).Building == BuildingKind.TownHall, "시청 배치"); True(sim.Get(Resource.Bread) > 0 && s.Coins >= 1000, "초보자 비상 자원");
-        Equal(4, s.Version, "새 게임 저장 버전"); True(s.Era == Era.Medieval, "중세 시작");
+        Equal(6, s.Version, "새 게임 저장 버전"); True(s.Era == Era.Medieval, "중세 시작");
         Equal(0, s.Technologies.Count, "기술 없이 시작"); True(!s.Cells.Any(c => c.Building == BuildingKind.Windmill), "시작 풍차 없음");
-        Equal(18, TechCatalog.All.Count(), "확장 기술 카탈로그 18개");
+        Equal(26, TechCatalog.All.Count(), "복합 산업 기술 카탈로그 26개");
         Equal(Enum.GetValues<BuildingKind>().Length, Catalog.All.Count(), "모든 건물 카탈로그 등록"); True(Catalog.ResourceName(Resource.Tools) == "도구", "한국어 자원명");
     }
 
@@ -58,8 +71,8 @@ static class Check
 
         var legacy = GameState.CreateNew(); legacy.Version = 1; legacy.Day = 37; legacy.Coins = 777; legacy.Population = 6;
         var legacySim = new Simulation(legacy);
-        Equal(4, legacy.Version, "v1 저장 v4 마이그레이션"); True(legacy.Era == Era.Industrial, "기존 도시 산업 시대 승계");
-        Equal(TechCatalog.All.Count(), legacy.Technologies.Count, "v1 기존 도시가 현재 전체 기술 승계"); Equal(37, legacy.Day, "마이그레이션 날짜 보존"); Equal(777f, legacySim.Get(Resource.Coins), "마이그레이션 자원 보존");
+        Equal(6, legacy.Version, "v1 저장 v6 마이그레이션"); True(legacy.Era == Era.Industrial, "기존 도시 산업 시대 승계");
+        Equal(18, legacy.Technologies.Count, "v1 기존 도시가 원래 18개 기술만 승계"); Equal(37, legacy.Day, "마이그레이션 날짜 보존"); Equal(777f, legacySim.Get(Resource.Coins), "마이그레이션 자원 보존");
     }
 
     static void ExpandedTechnologyPrerequisitesAndBenefits()

@@ -9,7 +9,7 @@ param(
     [string]$Sha256Path,
 
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$ExpectedVersion = '0.7.0',
+    [string]$ExpectedVersion = '0.9.0',
 
     [Alias('AndroidApkPath')]
     [string]$ApkPath
@@ -144,6 +144,12 @@ function Assert-ReleaseZip {
         }
         if ([Version]$Version -ge [Version]'0.7.0') {
             $requiredPaths += @('RESEARCH_TREE.ko.md', 'Images/research-tree-v0.7.png');
+        }
+        if ([Version]$Version -ge [Version]'0.8.0') {
+            $requiredPaths += @('INDUSTRY_GUIDE.ko.md', 'Images/industry-v0.8.png');
+        }
+        if ([Version]$Version -ge [Version]'0.9.0') {
+            $requiredPaths += @('EXPANSION_GUIDE.ko.md', 'Images/expansion-v0.9.png');
         }
         $requiredEntries = @{}
         foreach ($relativePath in $requiredPaths) {

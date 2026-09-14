@@ -142,11 +142,14 @@ namespace Riverworks
             ResearchGraph graph = tree.Graph;
             ResearchTreeLayout layout = tree.Layout;
             Require(graph != null && layout != null, "tree exposes its immutable graph and deterministic layout");
-            Require(graph.OrderedTechnologies.Count == 18, "research graph contains exactly 18 technologies");
-            Require(graph.Edges.Count == 19 && graph.Edges.Distinct().Count() == 19,
-                "research graph contains exactly 19 unique prerequisite edges");
-            Require(tree.Nodes.Count == 18 && tree.Connections.Count == 19,
+            Require(graph.OrderedTechnologies.Count == TechCatalog.All.Count(), "research graph contains every catalog technology");
+            Require(graph.OrderedTechnologies.Count == 26, "research graph contains the 26 v0.8 technologies");
+            Require(graph.Edges.Count == 35 && graph.Edges.Distinct().Count() == 35,
+                "research graph contains exactly 35 unique prerequisite edges");
+            Require(tree.Nodes.Count == graph.OrderedTechnologies.Count && tree.Connections.Count == graph.Edges.Count,
                 "rendered node and connection dictionaries match the graph exactly");
+            Require(graph.OrderedTechnologies.Max(spec => graph.Depth(spec.Id)) + 1 == 12,
+                "research graph reaches twelve topological columns");
             Require(tree.GraphViewport != null && tree.GraphViewport.name == "ResearchGraphViewport" &&
                     tree.GraphContent != null && tree.GraphContent.name == "ResearchGraphContent" && tree.TreeScroll != null,
                 "scene has the named masked graph viewport, graph content, and ScrollRect");
@@ -171,6 +174,9 @@ namespace Riverworks
                         Mathf.Abs(((RectTransform)start.transform).rect.height - 44f) < .6f,
                     spec.Id + " keeps a stable 208x44 start action");
             }
+            Require(layout.NodeRect(TechId.CropRotation).position == new Vector2(24f, 64f) &&
+                    layout.NodeRect(TechId.Stonecraft).position == new Vector2(24f, 244f),
+                "the two legacy roots retain their deterministic 224x156 starting positions");
 
             foreach (ResearchEdge edge in graph.Edges)
             {
@@ -260,7 +266,7 @@ namespace Riverworks
             yield return null;
             Require(!game.UiTextInputFocused, "deactivating search restores gameplay shortcut eligibility");
             tree.ResetView();
-            Require(tree.MatchingCount == 18 && tree.ZoomLevel == 1,
+            Require(tree.MatchingCount == tree.Graph.OrderedTechnologies.Count && tree.ZoomLevel == 1,
                 "ResetView clears search and restores overview zoom");
 
             tree.FocusTechnology(TechId.Guilds);
@@ -269,7 +275,7 @@ namespace Riverworks
             {
                 tree.SetFilter(filter);
                 Canvas.ForceUpdateCanvases();
-                Require(tree.SelectedTechnology == selected && tree.Nodes.Count == 18,
+                Require(tree.SelectedTechnology == selected && tree.Nodes.Count == tree.Graph.OrderedTechnologies.Count,
                     filter + " filter preserves selection and graph context");
             }
 
@@ -305,7 +311,7 @@ namespace Riverworks
             Click(FindButton("Button_ResearchZoomOut"));
             Require(tree.ZoomLevel == 1, "zoom-out button returns to 1x through EventSystem");
             Click(FindButton("Button_ResearchReset"));
-            Require(tree.ZoomLevel == 1 && tree.MatchingCount == 18, "reset button restores the complete overview");
+            Require(tree.ZoomLevel == 1 && tree.MatchingCount == tree.Graph.OrderedTechnologies.Count, "reset button restores the complete overview");
             VerifyMiniMapPointerNavigation();
         }
 
@@ -327,7 +333,16 @@ namespace Riverworks
             tree.SetZoom(2);
             yield return null;
             Canvas.ForceUpdateCanvases();
-            Require(IsFirstRaycastTarget(tree.Nodes[TechId.Automation].GetComponent<Button>()),
+            Button zoomedNode = tree.Nodes[TechId.Automation].GetComponent<Button>();
+            bool immediatelyReachable=IsFirstRaycastTarget(zoomedNode);
+            if(!immediatelyReachable)
+            {
+                var diagnosticHits = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(PointerAtButtonCenter(zoomedNode), diagnosticHits);
+                results.Add("ZOOM_DIAGNOSTIC viewport="+tree.GraphViewport.rect+" content="+tree.GraphContent.anchoredPosition+" graphCenter="+tree.GraphCenter+" node="+tree.Layout.NodeRect(TechId.Automation)+" hit="+(diagnosticHits.Count>0?diagnosticHits[0].gameObject.name:"none"));
+                yield return Capture(prefix + "-zoom-failure.png");
+            }
+            Require(immediatelyReachable,
                 prefix + " keeps selected Automation visible and pointer-reachable immediately after 2x zoom");
             tree.SetSearch(width == 1024 ? TechCatalog.Get(TechId.Guilds).Name : "Automation");
             yield return Capture(prefix + "-04-zoom2-search.png");

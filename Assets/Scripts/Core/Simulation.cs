@@ -31,7 +31,8 @@ namespace Riverworks
         }
         public float ResearchPerDay => .8f + State.Population * .04f
             + State.Cells.Where(c => c.Connected && c.Building == BuildingKind.StudyHouse).Sum(c => c.Level * (TechCatalog.Has(State, TechId.Education) ? 2.5f : 1.5f))
-            + State.Cells.Where(c => c.Connected && c.Building == BuildingKind.Academy).Sum(c => c.Level * 3.5f);
+            + State.Cells.Where(c => c.Connected && c.Building == BuildingKind.Academy).Sum(c => c.Level * 3.5f)
+            + CityProjects.ResearchBonus(State);
         public int UpgradeLevelCap => TechCatalog.Has(State, TechId.UrbanPlanning) ? 3 : TechCatalog.Has(State, TechId.Stonecraft) ? 2 : 1;
 
         private static readonly HashSet<BuildingKind> Powered = new HashSet<BuildingKind> { BuildingKind.Mill, BuildingKind.Bakery, BuildingKind.Mine, BuildingKind.Smelter, BuildingKind.Workshop };
@@ -95,6 +96,7 @@ namespace Riverworks
             if (kind == BuildingKind.None || kind == BuildingKind.TownHall) return Fail("이 건물은 직접 건설할 수 없습니다.", out reason);
             if (!IsBuildingUnlocked(kind, out reason)) return false;
             if (!IsOwned(x, z)) return Fail("먼저 이 지역을 매입하세요.", out reason);
+            if (CityProjects.Occupies(State, x, z)) return Fail("대형 프로젝트 부지는 개별 도시 건설에 사용할 수 없습니다.", out reason);
             if (cell.Building != BuildingKind.None) return Fail("이미 건물이 있습니다.", out reason);
             if (!CityLogistics.CanBuildCity(State, kind, x, z, out reason)) return false;
             if (cell.Terrain == TerrainKind.Water && kind != BuildingKind.Road) return Fail("물 위에는 도로 다리만 건설할 수 있습니다.", out reason);
@@ -127,6 +129,7 @@ namespace Riverworks
             Cell cell = GetCell(x, z);
             if (cell == null || cell.Building == BuildingKind.None) return Fail("철거할 건물이 없습니다.", out reason);
             if (cell.Building == BuildingKind.TownHall) return Fail("시청은 철거할 수 없습니다.", out reason);
+            if (CityProjects.Occupies(State, x, z)) return Fail("대형 프로젝트 부지는 프로젝트 취소 절차로만 정리할 수 있습니다.", out reason);
             if (!CityLogistics.CanDemolishCity(State, cell, out reason)) return false;
             BuildingSpec spec = Catalog.Get(cell.Building);
             // Refund a conservative portion of the exact base and upgrade investment.
@@ -136,7 +139,7 @@ namespace Riverworks
             Add(Resource.Timber, spec.TimberCost * materialInvestment * .25f);
             Add(Resource.Stone, spec.StoneCost * materialInvestment * .25f);
             CityLogistics.EnsureCellBuffers(cell);
-            for (int i = 1; i < 9; i++)
+            for (int i = 1; i < ResourceCatalog.Count; i++)
             {
                 State.Stock[i] += cell.LogisticsInput[i] + cell.LogisticsOutput[i];
                 cell.LogisticsInput[i] = 0;
@@ -193,11 +196,14 @@ namespace Riverworks
             State.Day++;
             State.ResearchPoints += ResearchPerDay;
             AdvanceResearch();
+            CityProjects.Tick(State);
+            Recalculate();
             PowerUsed = 0;
             float produced = 0;
             int warehouseLevels = State.Cells.Where(c => c.Connected && c.Building == BuildingKind.Warehouse).Sum(c => c.Level);
             float logistics = 1 + Math.Min(.25f, warehouseLevels * .03f);
-            PowerCapacity = State.Cells.Where(c => c.Connected && c.Building == BuildingKind.Windmill).Sum(c => c.Level * 8);
+            PowerCapacity = State.Cells.Where(c => c.Connected && c.Building == BuildingKind.Windmill).Sum(c => c.Level * 8)
+                + CityProjects.ProducePower(State);
             foreach (Cell steam in State.Cells.Where(c => c.Connected && c.Building == BuildingKind.SteamPlant))
             {
                 float fuel = steam.Level * .6f;
@@ -293,7 +299,8 @@ namespace Riverworks
             }
             ConnectedBuildings = State.Cells.Count(c => c.Connected && c.Building != BuildingKind.None);
             PowerCapacity = State.Cells.Where(c => c.Connected && c.Building == BuildingKind.Windmill).Sum(c => c.Level * 8)
-                + PreviewSteamPowerCapacity();
+                + PreviewSteamPowerCapacity()
+                + CityProjects.PreviewPower(State);
             int housingCapacity = State.Cells.Where(c => c.Building == BuildingKind.House).Sum(c => c.Level * 6);
             State.Population = Math.Min(State.Population, housingCapacity);
             SyncCoins();
@@ -425,8 +432,9 @@ namespace Riverworks
 
         private void Normalize()
         {
-            TechCatalog.MigrateLegacy(State);
-            int count = Enum.GetValues(typeof(Resource)).Length;
+            if (State.Version >= 1 && State.Version <= 4) IndustryMigration.UpgradeLegacy(State);
+            if (State.Version == 5) ExpansionMigration.Upgrade(State);
+            int count = ResourceCatalog.Count;
             State.Stock ??= new List<float>();
             while (State.Stock.Count < count) State.Stock.Add(0);
             if (State.Cells == null || State.Cells.Count != State.Size * State.Size) throw new ArgumentException("맵 셀 수가 올바르지 않습니다.");

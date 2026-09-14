@@ -16,7 +16,7 @@ public static class FactoryChecks
     static void CatalogAndPlacement()
     {
         var s = FactoryState.CreateEmpty(); var sim = new FactorySimulation(s);
-        True(FactoryCatalog.All.Count() == 11, "모든 공장 설비 카탈로그 등록");
+        True(FactoryCatalog.All.Count() == Enum.GetValues<FactoryKind>().Length - 1, "모든 공장 설비 카탈로그 등록");
         True(!sim.TryPlace(FactoryKind.Drill, 10, 10, 0, out var why) && why.Contains("광맥"), "광맥 밖 채굴기 거부");
         True(sim.TryPlace(FactoryKind.Drill, 1, 7, 3, out why), "광맥 위 2x2 채굴기 배치");
         True(sim.GetAt(2, 8)?.Kind == FactoryKind.Drill, "2x2 점유 셀 조회");
@@ -160,7 +160,7 @@ public static class FactoryChecks
     static void SaveContract()
     {
         FactoryState s = FactoryState.CreateExample(); FactorySimulation.ValidateState(s);
-        True(s.Version == 1 && s.Entities.Count > 0 && s.Entities.All(e => e.Input.Count == 9 && e.Output.Count == 9), "직렬화 DTO 고정 길이 목록");
+        True(s.Version == 3 && s.Entities.Count > 0 && s.Entities.All(e => e.Input.Count == ResourceCatalog.Count && e.Output.Count == ResourceCatalog.Count), "직렬화 DTO 현재 자원 길이 목록");
         var bad = FactoryState.CreateEmpty(); bad.Produced[0] = 1;
         bool rejected = false; try { FactorySimulation.ValidateState(bad); } catch (System.IO.InvalidDataException) { rejected = true; }
         True(rejected, "센티널 오염 저장 데이터 거부");

@@ -16,7 +16,7 @@ namespace Riverworks.Editor
         {
             PlayerSettings.companyName="Riverworks Studio";
             PlayerSettings.productName="Riverworks";
-            PlayerSettings.bundleVersion="0.7.0";
+            PlayerSettings.bundleVersion="0.9.0";
             PlayerSettings.SetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.Standalone,"studio.riverworks.city");
             PlayerSettings.defaultScreenWidth=1600; PlayerSettings.defaultScreenHeight=900;
             PlayerSettings.defaultIsNativeResolution=false;
@@ -62,7 +62,11 @@ namespace Riverworks.Editor
             Prepare();
             VerifySaveRoundTrip();
             SaveValidationChecks.Run();
-            string directory=Path.GetFullPath("Builds/Windows");Directory.CreateDirectory(directory);
+            string[] args=Environment.GetCommandLineArgs();int outputIndex=Array.IndexOf(args,"-riverworks-build-output");
+            string directory=Path.GetFullPath(outputIndex>=0&&outputIndex+1<args.Length?args[outputIndex+1]:"Builds/Windows");
+            string builds=Path.GetFullPath("Builds").TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)+Path.DirectorySeparatorChar;
+            if(!directory.StartsWith(builds,StringComparison.OrdinalIgnoreCase))throw new Exception("Windows build output must be inside this project's Builds directory.");
+            Directory.CreateDirectory(directory);
             var report=BuildPipeline.BuildPlayer(new BuildPlayerOptions{scenes=new[]{ScenePath},locationPathName=Path.Combine(directory,"Riverworks.exe"),target=BuildTarget.StandaloneWindows64,options=BuildOptions.None});
             if(report.summary.result!=BuildResult.Succeeded) throw new Exception("Windows build failed: "+report.summary.result+" errors="+report.summary.totalErrors);
             Directory.CreateDirectory("Artifacts");

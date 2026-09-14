@@ -45,12 +45,15 @@ namespace Riverworks
         Text populationText, incomeText, eraText, researchSummaryText, objectiveTitle, objectiveBody, objectiveProgress, objectiveChipText;
         Text inspectorTitle, inspectorBody, noticeText, buildInfo, modeText, upgradeLabel, factoryConfigureSummary, overviewBody, feelModeLabel;
         Button upgradeButton, factoryConfigureButton, factoryRotateButton, buildCollapseButton, removeButton;
+        Button factoryPauseButton, factoryRecoverButton, factoryAutomationButton, factoryFoundationButton, factoryLinkDownButton, factoryLinkUpButton;
+        readonly Dictionary<int, Button> factoryClockButtons = new Dictionary<int, Button>();
+        readonly Dictionary<int, Button> factoryFloorButtons = new Dictionary<int, Button>();
         GameObject objectivePanel, inspectorPanel, buildChoicesPanel, activeToolPanel;
         GameObject helpOverlay, confirmOverlay, researchOverlay, mobileTradeOverlay, factoryConfigureOverlay;
         GameObject menuOverlay, overviewOverlay, territoryOverlay;
-        GameObject factoryRecipeSection, factoryFilterSection, factoryFeedSection;
+        GameObject factoryRecipeSection, factoryFilterSection, factoryFeedSection, factoryFloorStrip;
         CanvasGroup noticeGroup;
-        RectTransform buildViewport, buildScrollViewport, buildChoicesRect, buildTooltipRect, activeToolRect, inspectorRowsRoot;
+        RectTransform buildViewport, buildScrollViewport, buildChoicesRect, buildTooltipRect, activeToolRect, activeToolContent, inspectorRowsRoot;
         readonly List<Text> inspectorRowLabels = new List<Text>();
         readonly List<Text> inspectorRowValues = new List<Text>();
         readonly Dictionary<Resource, GameObject> resourceChips = new Dictionary<Resource, GameObject>();
@@ -75,6 +78,9 @@ namespace Riverworks
         int appliedScreenWidth=-1, appliedScreenHeight=-1, lastNoticeVersion=-1;
 
         public ResearchTreeView ResearchTree { get; private set; }
+        public IndustryPanel Industry { get; private set; }
+        public AutomationRulePanel Automation { get; private set; }
+        public CityProjectPanel Projects { get; private set; }
 
         public bool ConstructionBarVisible => (buildChoicesPanel!=null&&buildChoicesPanel.activeInHierarchy) || (activeToolPanel!=null&&activeToolPanel.activeInHierarchy);
         public float ConstructionBarHeight => buildChoicesPanel!=null&&buildChoicesPanel.activeInHierarchy ? 72f : activeToolPanel!=null&&activeToolPanel.activeInHierarchy ? 52f : 0f;
@@ -237,6 +243,27 @@ namespace Riverworks
             controller.Factory.Feed(resource,10);Refresh();
         }
 
+        public void OpenIndustryCodex()
+        {
+            CloseTransientPanels();
+            Industry?.Open();
+        }
+
+        public void OpenAutomationRules()
+        {
+            FactoryEntity selected=controller==null?null:controller.SelectedFactory;
+            if(selected==null)return;
+            if((selected.Kind==FactoryKind.ItemLift||selected.Kind==FactoryKind.FluidRiser)&&!selected.IsLinkSender)return;
+            CloseTransientPanels();
+            Automation?.Open(selected.Id);
+        }
+
+        public void OpenCityProjects()
+        {
+            CloseTransientPanels();
+            Projects?.Open();
+        }
+
         void BuildInterface()
         {
             foreach (Transform child in transform) Destroy(child.gameObject);
@@ -341,7 +368,7 @@ namespace Riverworks
             VerticalLayoutGroup rowsLayout=rows.GetComponent<VerticalLayoutGroup>();rowsLayout.spacing=2;rowsLayout.childForceExpandHeight=false;rowsLayout.childForceExpandWidth=true;
             rows.GetComponent<ContentSizeFitter>().verticalFit=ContentSizeFitter.FitMode.PreferredSize;
             ScrollRect rowsScroll=rowsViewport.GetComponent<ScrollRect>();rowsScroll.viewport=rowsViewport.GetComponent<RectTransform>();rowsScroll.content=inspectorRowsRoot;rowsScroll.horizontal=false;rowsScroll.vertical=true;rowsScroll.movementType=ScrollRect.MovementType.Clamped;
-            for(int i=0;i<7;i++)CreateInspectorRow(rows.transform);
+            for(int i=0;i<10;i++)CreateInspectorRow(rows.transform);
             inspectorBody = LabelAt("", inspectorPanel.transform, HudStyle.BodySize, Ink, FontStyle.Normal, new Vector2(14,-42), new Vector2(264,116));
             inspectorBody.gameObject.SetActive(false);
             upgradeButton=MakeButton("선택 건물 업그레이드", inspectorPanel.transform, new Vector2(14,-164), new Vector2(264,44), Navy2, () => controller.UpgradeSelected(), new Vector2(0,1),11);
@@ -401,6 +428,21 @@ namespace Riverworks
             HorizontalLayoutGroup layout=content.GetComponent<HorizontalLayoutGroup>();layout.spacing=6;layout.childForceExpandWidth=false;layout.childForceExpandHeight=true;
             ContentSizeFitter contentFitter=content.GetComponent<ContentSizeFitter>();contentFitter.horizontalFit=ContentSizeFitter.FitMode.PreferredSize;
             ScrollRect buildScroll=viewport.GetComponent<ScrollRect>();buildScroll.viewport=buildScrollViewport;buildScroll.content=buildViewport;buildScroll.horizontal=true;buildScroll.vertical=false;buildScroll.movementType=ScrollRect.MovementType.Clamped;
+            factoryFloorStrip=Box("FactoryFloorStrip",content.transform,Vector2.zero,new Vector2(610,56),HudStyle.Surface,new Vector2(0,0));
+            LayoutElement floorStripLayout=factoryFloorStrip.AddComponent<LayoutElement>();floorStripLayout.preferredWidth=610;floorStripLayout.preferredHeight=56;
+            string[] floorNames={"지상","2층","3층"};
+            for(int i=0;i<floorNames.Length;i++)
+            {
+                int floor=i;
+                Button button=MakeButton(floorNames[i],factoryFloorStrip.transform,new Vector2(i*72,-6),new Vector2(66,44),Navy2,()=>{controller.Factory?.SetFloor(floor);Refresh();},new Vector2(0,1),11);
+                button.name="Button_FactoryFloor_"+floor;factoryFloorButtons[floor]=button;
+            }
+            factoryFoundationButton=MakeButton("기반 설치",factoryFloorStrip.transform,new Vector2(222,-6),new Vector2(96,44),Navy2,()=>{controller.Factory?.SelectFoundation();Refresh();},new Vector2(0,1),11);
+            factoryFoundationButton.name="Button_FactoryFoundation";
+            factoryLinkDownButton=MakeButton("연결층 ↓",factoryFloorStrip.transform,new Vector2(324,-6),new Vector2(132,44),Navy2,()=>{if(controller.Factory!=null)controller.Factory.SetLinkTargetFloor(controller.Factory.ActiveFloor-1);Refresh();},new Vector2(0,1),11);
+            factoryLinkDownButton.name="Button_FactoryLinkDown";
+            factoryLinkUpButton=MakeButton("연결층 ↑",factoryFloorStrip.transform,new Vector2(462,-6),new Vector2(132,44),Navy2,()=>{if(controller.Factory!=null)controller.Factory.SetLinkTargetFloor(controller.Factory.ActiveFloor+1);Refresh();},new Vector2(0,1),11);
+            factoryLinkUpButton.name="Button_FactoryLinkUp";
             foreach (BuildingSpec spec in Catalog.All)
             {
                 if (spec.Kind == BuildingKind.None || spec.Kind == BuildingKind.TownHall) continue;
@@ -425,8 +467,8 @@ namespace Riverworks
             activeToolPanel=Box("ActiveTool",transform,new Vector2(0,68),new Vector2(460,52),new Color(Navy.r,Navy.g,Navy.b,.98f),new Vector2(.5f,0));
             activeToolRect=activeToolPanel.GetComponent<RectTransform>();
             GameObject activeViewport=new GameObject("ActiveToolViewport",typeof(RectTransform),typeof(RectMask2D),typeof(ScrollRect));activeViewport.transform.SetParent(activeToolPanel.transform,false);Rect(activeViewport,Vector2.zero,Vector2.one,new Vector2(4,4),new Vector2(-4,-4));
-            GameObject activeContent=new GameObject("ActiveToolContent",typeof(RectTransform));activeContent.transform.SetParent(activeViewport.transform,false);RectTransform activeContentRect=activeContent.GetComponent<RectTransform>();activeContentRect.anchorMin=new Vector2(0,0);activeContentRect.anchorMax=new Vector2(0,1);activeContentRect.pivot=new Vector2(0,.5f);activeContentRect.anchoredPosition=Vector2.zero;activeContentRect.sizeDelta=new Vector2(452,0);
-            ScrollRect activeScroll=activeViewport.GetComponent<ScrollRect>();activeScroll.viewport=activeViewport.GetComponent<RectTransform>();activeScroll.content=activeContentRect;activeScroll.horizontal=true;activeScroll.vertical=false;activeScroll.movementType=ScrollRect.MovementType.Clamped;
+            GameObject activeContent=new GameObject("ActiveToolContent",typeof(RectTransform));activeContent.transform.SetParent(activeViewport.transform,false);activeToolContent=activeContent.GetComponent<RectTransform>();activeToolContent.anchorMin=new Vector2(0,0);activeToolContent.anchorMax=new Vector2(0,1);activeToolContent.pivot=new Vector2(0,.5f);activeToolContent.anchoredPosition=Vector2.zero;activeToolContent.sizeDelta=new Vector2(452,0);
+            ScrollRect activeScroll=activeViewport.GetComponent<ScrollRect>();activeScroll.viewport=activeViewport.GetComponent<RectTransform>();activeScroll.content=activeToolContent;activeScroll.horizontal=true;activeScroll.vertical=false;activeScroll.movementType=ScrollRect.MovementType.Clamped;
             modeText=LabelAt("",activeContent.transform,HudStyle.BodySize,Cream,FontStyle.Normal,new Vector2(8,-0),new Vector2(230,42));
             modeText.alignment=TextAnchor.MiddleLeft;
             Button cancel=MakeButton("취소",activeContent.transform,new Vector2(242,0),new Vector2(86,44),Navy2,CancelTool,new Vector2(0,1),12);
@@ -577,6 +619,8 @@ namespace Riverworks
             RefreshInspector(); RefreshBuildChoices(); RefreshBuildInfo();
             RefreshOverview();
             RefreshFeelModeLabel();
+            if(Automation!=null&&Automation.IsOpen)Automation.Refresh();
+            if(Projects!=null&&Projects.IsOpen)Projects.Refresh();
             for(int i=0;i<speedButtons.Count;i++){float v=i==0?0:i==1?1:3; SetButtonColor(speedButtons[i],Mathf.Approximately(controller.GameSpeed,v)?Coral:Navy2);}
             FactoryKind factoryTool=controller.Factory==null?FactoryKind.None:controller.Factory.SelectedTool;
             modeText.text=ActiveToolSummary(factoryTool);
@@ -621,6 +665,7 @@ namespace Riverworks
         string ActiveToolSummary(FactoryKind factoryTool)
         {
             if(controller.Factory!=null&&controller.Factory.RemovalMode)return "설비 철거\n선택한 설비를 제거합니다";
+            if(controller.Factory!=null&&controller.Factory.FoundationMode)return (controller.Factory.ActiveFloor==1?"2층":"3층")+" 기반 설치\n30G · 강철 보 2 · 모듈 프레임 1";
             if(controller.DemolitionMode)return "철거 모드\n선택한 건물을 제거합니다";
             if(factoryTool!=FactoryKind.None)
             {
@@ -651,8 +696,16 @@ namespace Riverworks
                 bool bad=!machine.Powered||StatusIsProblem(status);
                 var rows=new List<InspectorRow>();
                 rows.Add(new InspectorRow("상태",(bad?"●  ":"")+status,bad));
-                string configuration=machine.Kind==FactoryKind.Furnace||machine.Kind==FactoryKind.Assembler?FactoryCatalog.RecipeName(machine.Recipe):machine.Kind==FactoryKind.Inserter?(machine.Filter==Resource.Coins?"모든 물자":Catalog.ResourceName(machine.Filter)):"";
-                if(!string.IsNullOrEmpty(configuration))rows.Add(new InspectorRow(machine.Kind==FactoryKind.Inserter?"필터":"제조법",configuration));
+                int ruleCount=controller.State.Factory.AutomationRules==null?0:controller.State.Factory.AutomationRules.Count(rule=>rule!=null&&rule.TargetEntityId==machine.Id&&rule.Enabled);
+                string control=machine.Paused?"수동 정지":machine.AutomationBlocked?"자동 조건 대기":ruleCount>0?"자동 조건 "+ruleCount+"개 · 가동 허용":"수동 운전";
+                rows.Add(new InspectorRow("제어",control,machine.AutomationBlocked));
+                string floor=(machine.Floor==0?"지상":machine.Floor==1?"2층":"3층");
+                string link=machine.LinkId>0?" · "+(machine.IsLinkSender?"송신":"수신")+" → 설비 #"+machine.LinkId:"";
+                rows.Add(new InspectorRow("층/연결",floor+link));
+                bool filterable=machine.Kind==FactoryKind.Inserter||FactoryCatalog.IsFluidTransport(machine.Kind);
+                string configuration=FactoryCatalog.IsProduction(machine.Kind)?FactoryCatalog.RecipeName(machine.Recipe):filterable?(machine.Filter==Resource.Coins?"자동":ResourceCatalog.Get(machine.Filter)?.Name):"";
+                if(!string.IsNullOrEmpty(configuration))rows.Add(new InspectorRow(filterable?"필터":"제조법",configuration));
+                if(FactoryCatalog.IsClockable(machine.Kind))rows.Add(new InspectorRow("가동률",(machine.Paused?"정지 · ":"")+machine.ClockPercent+"%"));
                 string activity=FactoryActivityText(machine).Trim().Trim('·').Trim();
                 rows.Add(new InspectorRow("생산",string.IsNullOrEmpty(activity)?"대기":activity));
                 if(spec!=null&&spec.PowerDemand>0)rows.Add(new InspectorRow("전력",(machine.Powered?"공급됨":"●  공급 필요")+" · "+spec.PowerDemand.ToString("0.##"),!machine.Powered));
@@ -748,11 +801,60 @@ namespace Riverworks
         void RefreshBuildChoices()
         {
             FactoryKind selectedFactory=controller.Factory==null?FactoryKind.None:controller.Factory.SelectedTool;
-            bool activeTool=controller.SelectedTool!=BuildingKind.None||controller.DemolitionMode||selectedFactory!=FactoryKind.None||(controller.Factory!=null&&controller.Factory.RemovalMode);
+            bool activeTool=controller.SelectedTool!=BuildingKind.None||controller.DemolitionMode||selectedFactory!=FactoryKind.None||(controller.Factory!=null&&(controller.Factory.RemovalMode||controller.Factory.FoundationMode));
             if(buildChoicesPanel!=null)buildChoicesPanel.SetActive(buildTrayOpen&&!activeTool);
             if(activeToolPanel!=null)activeToolPanel.SetActive(activeTool);
             foreach(var tab in categoryButtons) SetButtonColor(tab.Value,tab.Key==category?Coral:Navy2);
             bool factoryCategory=IsFactoryCategory(category);
+            if(factoryFloorStrip!=null&&activeToolContent!=null&&buildViewport!=null)
+            {
+                Transform desired=activeTool&&factoryCategory?activeToolContent:buildViewport;
+                if(factoryFloorStrip.transform.parent!=desired)factoryFloorStrip.transform.SetParent(desired,false);
+                RectTransform strip=factoryFloorStrip.transform as RectTransform;
+                if(desired==activeToolContent)
+                {
+                    strip.anchorMin=strip.anchorMax=strip.pivot=new Vector2(0,1);strip.anchoredPosition=new Vector2(452,0);strip.sizeDelta=new Vector2(610,44);
+                    activeToolContent.sizeDelta=new Vector2(1062,0);
+                }
+                else
+                {
+                    strip.sizeDelta=new Vector2(610,56);
+                    activeToolContent.sizeDelta=new Vector2(452,0);
+                }
+                float stripButtonY=desired==activeToolContent?0:-6;
+                foreach(Button floorButton in factoryFloorButtons.Values)SetFactoryStripButtonY(floorButton,stripButtonY);
+                SetFactoryStripButtonY(factoryFoundationButton,stripButtonY);
+                SetFactoryStripButtonY(factoryLinkDownButton,stripButtonY);
+                SetFactoryStripButtonY(factoryLinkUpButton,stripButtonY);
+            }
+            if(factoryFloorStrip!=null)factoryFloorStrip.SetActive(factoryCategory);
+            if(controller.Factory!=null)
+            {
+                foreach(var pair in factoryFloorButtons)
+                {
+                    pair.Value.interactable=true;
+                    Text label=pair.Value.GetComponentInChildren<Text>();
+                    if(label!=null)label.text=pair.Key==0?"지상":pair.Key==1?"2층":"3층";
+                    SetButtonColor(pair.Value,controller.Factory.ActiveFloor==pair.Key?Coral:Navy2);
+                }
+                bool foundationVisible=factoryCategory&&category=="설비";
+                factoryFoundationButton.gameObject.SetActive(foundationVisible);
+                TechId foundationTech=controller.Factory.ActiveFloor>=2?TechId.AdvancedManufacturing:TechId.MassProduction;
+                bool foundationUnlocked=TechCatalog.Has(controller.State,foundationTech);
+                factoryFoundationButton.interactable=foundationUnlocked;
+                factoryFoundationButton.GetComponentInChildren<Text>(true).text=foundationUnlocked?"기반 설치":"기반 잠김\n"+TechCatalog.Get(foundationTech).Name;
+                SetButtonColor(factoryFoundationButton,controller.Factory.FoundationMode?Coral:Navy2);
+                bool linkTool=selectedFactory==FactoryKind.ItemLift||selectedFactory==FactoryKind.FluidRiser;
+                int activeFloor=controller.Factory.ActiveFloor;
+                factoryLinkDownButton.gameObject.SetActive(linkTool);
+                factoryLinkUpButton.gameObject.SetActive(linkTool);
+                factoryLinkDownButton.interactable=linkTool&&activeFloor>0;
+                factoryLinkUpButton.interactable=linkTool&&activeFloor<FactoryLayers.MaxFloor;
+                factoryLinkDownButton.GetComponentInChildren<Text>(true).text="연결층 ↓ "+FloorName(activeFloor-1);
+                factoryLinkUpButton.GetComponentInChildren<Text>(true).text="연결층 ↑ "+FloorName(activeFloor+1);
+                SetButtonColor(factoryLinkDownButton,linkTool&&controller.Factory.LinkTargetFloor==activeFloor-1?Coral:Navy2);
+                SetButtonColor(factoryLinkUpButton,linkTool&&controller.Factory.LinkTargetFloor==activeFloor+1?Coral:Navy2);
+            }
             foreach(var pair in buildButtons)
             {
                 BuildingSpec spec=Catalog.Get(pair.Key);
@@ -781,8 +883,10 @@ namespace Riverworks
                 SetButtonColor(pair.Value,selected?Coral:(available?Navy2:new Color(.28f,.32f,.36f,1)));
                 bool techUnlocked=spec.RequiredTech==TechId.None||TechCatalog.Has(controller.State,spec.RequiredTech);
                 string technology=spec.RequiredTech==TechId.None?"잠김":TechCatalog.Get(spec.RequiredTech).Name;
-                factoryLabels[pair.Key].text=spec.Name+"\n"+(techUnlocked?spec.CoinCost+"G":"잠김 "+technology);
-                SetBuildTooltip(pair.Value,spec.Description+"\n비용 "+spec.CoinCost+"G · 목재 "+spec.TimberCost+" · 석재 "+spec.StoneCost+(available?"":"\n"+reason));
+                bool paired=pair.Key==FactoryKind.ItemLift||pair.Key==FactoryKind.FluidRiser;
+                int multiplier=paired?2:1;
+                factoryLabels[pair.Key].text=spec.Name+"\n"+(techUnlocked?spec.CoinCost*multiplier+"G"+(paired?" · 한 쌍":""):"잠김 "+technology);
+                SetBuildTooltip(pair.Value,spec.Description+"\n총비용 "+spec.CoinCost*multiplier+"G · 목재 "+spec.TimberCost*multiplier+" · 석재 "+spec.StoneCost*multiplier+(available?"":"\n"+reason));
             }
             if(factoryRotateButton!=null)
             {
@@ -804,6 +908,7 @@ namespace Riverworks
             int expectedFactoryCount=FactoryCatalog.All.Count(spec=>spec!=null && spec.Kind!=FactoryKind.None);
             if(categoryButtons.Count!=6 || !categoryButtons.ContainsKey("설비") || !categoryButtons.ContainsKey("물류")){reason="도시와 설비 분류 탭이 모두 생성되지 않았습니다.";return false;}
             if(factoryButtons.Count!=expectedFactoryCount || factoryRotateButton==null){reason="설비 도구 또는 회전 버튼이 모두 생성되지 않았습니다.";return false;}
+            if(factoryFloorButtons.Count!=FactoryLayers.MaxFloor+1||!factoryFloorButtons.ContainsKey(0)||!factoryFloorButtons.ContainsKey(1)||!factoryFloorButtons.ContainsKey(2)||factoryFoundationButton==null||factoryLinkDownButton==null||factoryLinkUpButton==null){reason="공장 층과 기반·연결층 도구가 모두 생성되지 않았습니다.";return false;}
             int visible=0;
             foreach(var button in buildButtons.Values)
             {
@@ -823,7 +928,11 @@ namespace Riverworks
             Image factoryBlocker=factoryConfigureOverlay==null?null:factoryConfigureOverlay.GetComponent<Image>();
             RectTransform factoryOverlayRect=factoryConfigureOverlay==null?null:factoryConfigureOverlay.transform as RectTransform;
             if(factoryBlocker==null || !factoryBlocker.raycastTarget || factoryConfigureWindow==null || factoryOverlayRect==null || !ContainsBounds(factoryOverlayRect,factoryConfigureWindow,1f)){reason="설비 구성 창이 화면 안에서 월드 입력을 차단하지 못합니다.";return false;}
-            if(factoryRecipeButtons.Count!=4 || factoryFilterButtons.Count!=9 || factoryFeedButtons.Count!=8){reason="설비 구성 선택지가 모두 생성되지 않았습니다.";return false;}
+            int recipeCount=FactoryCatalog.Recipes.Count(item=>item!=null&&item.Id!=FactoryRecipe.None);
+            if(factoryRecipeButtons.Count!=recipeCount || factoryFilterButtons.Count!=ResourceCatalog.Count || factoryFeedButtons.Count!=ResourceCatalog.Count-1){reason="설비 구성 선택지가 카탈로그와 일치하지 않습니다.";return false;}
+            if(!factoryRecipeButtons.ContainsKey(FactoryRecipe.IronPlate)||!factoryRecipeButtons.ContainsKey(FactoryRecipe.Tools)||!factoryRecipeButtons.ContainsKey(FactoryRecipe.Flour)||!factoryRecipeButtons.ContainsKey(FactoryRecipe.Bread)){reason="기존 제조법 버튼 이름이 보존되지 않았습니다.";return false;}
+            if(Industry==null){reason="산업 도감이 생성되지 않았습니다.";return false;}
+            if(Automation==null||Projects==null||factoryAutomationButton==null){reason="자동화 또는 도시 프로젝트 UI가 생성되지 않았습니다.";return false;}
             if (researchOverlay == null || researchWindow == null || ResearchTree == null)
             { reason = "연구 지도가 생성되지 않았습니다."; return false; }
             Image blocker = researchOverlay.GetComponent<Image>();
@@ -884,6 +993,11 @@ namespace Riverworks
                 case FactoryKind.Belt:
                 case FactoryKind.Inserter:
                 case FactoryKind.Splitter:
+                case FactoryKind.Pipe:
+                case FactoryKind.PipeJunction:
+                case FactoryKind.FluidTank:
+                case FactoryKind.ItemLift:
+                case FactoryKind.FluidRiser:
                 case FactoryKind.ImportDock:
                 case FactoryKind.ExportDock:return "물류";
                 default:return "설비";
@@ -895,19 +1009,32 @@ namespace Riverworks
             switch((direction%4+4)%4){case 0:return "동쪽 →";case 1:return "북쪽 ↑";case 2:return "서쪽 ←";default:return "남쪽 ↓";}
         }
 
+        static string FloorName(int floor)=>floor==0?"지상":floor==1?"2층":floor==2?"3층":"-";
+
+        static void SetFactoryStripButtonY(Button button,float y)
+        {
+            RectTransform rect=button==null?null:button.transform as RectTransform;
+            if(rect!=null)rect.anchoredPosition=new Vector2(rect.anchoredPosition.x,y);
+        }
+
         static string FactoryInventoryText(List<int> inventory)
         {
             if(inventory==null)return "없음";
             var values=new List<string>();
-            for(int i=1;i<Math.Min(9,inventory.Count);i++)if(inventory[i]>0)values.Add(Catalog.ResourceName((Resource)i)+" "+inventory[i]);
+            for(int i=1;i<Math.Min(ResourceCatalog.InventoryCount,inventory.Count);i++)if(inventory[i]>0)
+            {
+                ResourceSpec spec=ResourceCatalog.Get((Resource)i);
+                values.Add((spec==null?((Resource)i).ToString():spec.Name)+" "+inventory[i]+(spec?.Unit??""));
+            }
             return values.Count==0?"없음":string.Join(" · ",values);
         }
 
         static string FactoryActivityText(FactoryEntity machine)
         {
             if(machine==null)return "";
-            if((int)machine.CargoResource>=1&&(int)machine.CargoResource<=8)return "운송 "+Catalog.ResourceName(machine.CargoResource)+" "+Mathf.RoundToInt(Mathf.Clamp01(machine.CargoProgress)*100f)+"%  ·  ";
-            float duration=machine.Kind==FactoryKind.Drill?2f:FactoryCatalog.RecipeDuration(machine.Recipe);
+            if(ResourceCatalog.IsTransportable(machine.CargoResource))return "운송 "+ResourceCatalog.Get(machine.CargoResource).Name+" "+Mathf.RoundToInt(Mathf.Clamp01(machine.CargoProgress)*100f)+"%  ·  ";
+            RecipeSpec recipe=FactoryCatalog.GetRecipe(machine.Recipe);
+            float duration=recipe==null?0:recipe.Duration;
             return duration>0?"공정 "+Mathf.RoundToInt(Mathf.Clamp01(machine.Progress/duration)*100f)+"%  ·  ":"";
         }
 
@@ -958,7 +1085,7 @@ namespace Riverworks
 
         void ToggleBuildTray()
         {
-            bool hasTool=controller.SelectedTool!=BuildingKind.None||controller.DemolitionMode||(controller.Factory!=null&&(controller.Factory.SelectedTool!=FactoryKind.None||controller.Factory.RemovalMode));
+            bool hasTool=controller.SelectedTool!=BuildingKind.None||controller.DemolitionMode||(controller.Factory!=null&&(controller.Factory.SelectedTool!=FactoryKind.None||controller.Factory.RemovalMode||controller.Factory.FoundationMode));
             if(hasTool){CancelTool();buildTrayOpen=true;}
             else buildTrayOpen=!buildTrayOpen;
             RefreshBuildChoices();RefreshBuildInfo();

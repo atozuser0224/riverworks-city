@@ -64,8 +64,14 @@ namespace Riverworks
             yield return new WaitForEndOfFrame();
 
             GameState fixture = SharedCityScenario.Create();
-            Check(fixture.Version == 4 && fixture.Factory.Width == 42 && fixture.Factory.Height == 42,
-                "fixture uses the v4 city save and shared 42x42 factory grid");
+            Check(fixture.Version == 6 && fixture.Factory.Version == 3 &&
+                  fixture.Factory.Width == 42 && fixture.Factory.Height == 42,
+                "fixture uses the v6 city/v3 factory schema and shared 42x42 factory grid");
+            Check(fixture.Stock.Count == ResourceCatalog.Count &&
+                  fixture.Factory.Produced.Count == ResourceCatalog.Count &&
+                  fixture.Factory.Exported.Count == ResourceCatalog.Count &&
+                  fixture.Factory.Recovered.Count == ResourceCatalog.Count,
+                "fixture allocates all 38 catalog resource slots across city and factory aggregates");
             Check(fixture.Factory.Produced.Sum() == 0 && fixture.Factory.Exported.Sum() == 0,
                 "fixture does not seed production or export counters");
             Require(SaveStore.TrySave(game.SavePath, fixture, out string fixtureSaveError),
@@ -338,8 +344,9 @@ namespace Riverworks
             yield return null;
             game.SetSpeed(0);
             factory = game.Factory;
-            Check(game.State.Version == 4 && game.State.Factory.Width == 42 && game.State.Factory.Height == 42,
-                "load preserves the shared-city save version and geometry");
+            Check(game.State.Version == 6 && game.State.Factory.Version == 3 &&
+                  game.State.Factory.Width == 42 && game.State.Factory.Height == 42,
+                "load preserves the v6 city/v3 factory schema and shared-city geometry");
             Check(Approximately(game.State.Stock[(int)Resource.Flour], flour) &&
                   game.State.Factory.Exported[(int)Resource.Flour] == exports,
                 "load preserves real city-port stock and factory export accounting");

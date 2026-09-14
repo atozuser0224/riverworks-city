@@ -276,7 +276,7 @@ public static class FactoryPropertyChecks
 
     static int[] CargoCounts(FactoryState state)
     {
-        var counts = new int[9];
+        var counts = new int[ResourceCatalog.Count];
         for (int i = 1; i < counts.Length; i++) counts[i] = PhysicalCount(state, (Resource)i);
         return counts;
     }

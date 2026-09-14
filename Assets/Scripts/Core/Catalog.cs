@@ -19,8 +19,7 @@ namespace Riverworks
         public static BuildingSpec Get(BuildingKind kind) => Specs.TryGetValue(kind, out var spec) ? spec : Specs[BuildingKind.None];
         public static string ResourceName(Resource resource)
         {
-            string[] names = { "코인", "목재", "석재", "곡물", "밀가루", "빵", "광석", "강철", "도구" };
-            return names[(int)resource];
+            return ResourceCatalog.Get(resource)?.Name ?? "알 수 없음";
         }
 
         private static Dictionary<BuildingKind, BuildingSpec> Create()

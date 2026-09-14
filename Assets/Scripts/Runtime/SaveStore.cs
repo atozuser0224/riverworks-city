@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 
 namespace Riverworks
@@ -65,8 +66,23 @@ namespace Riverworks
                 long length = new FileInfo(path).Length;
                 if (length <= 0 || length > MaximumSaveBytes) throw new IOException("저장 파일 크기가 올바르지 않습니다.");
                 var candidate = JsonUtility.FromJson<GameState>(File.ReadAllText(path));
-                NormalizeAbsentTutorial(candidate);
-                if(candidate!=null && candidate.Version>=1&&candidate.Version<=3){ValidateLegacyData(candidate);TechCatalog.MigrateLegacy(candidate);}
+                if(candidate!=null && candidate.Version>=1&&candidate.Version<=4)
+                {
+                    ValidateLegacyData(candidate);
+                    NormalizeAbsentTutorial(candidate);
+                    NormalizeAbsentLegacyFactories(candidate);
+                    IndustryMigration.UpgradeLegacy(candidate);
+                    ValidateVersion5(candidate);
+                    ExpansionMigration.Upgrade(candidate);
+                }
+                else if(candidate!=null&&candidate.Version==5)
+                {
+                    NormalizeAbsentTutorial(candidate);
+                    ValidateVersion5(candidate);
+                    NormalizeAbsentLegacyFactories(candidate);
+                    ExpansionMigration.Upgrade(candidate);
+                }
+                else NormalizeAbsentTutorial(candidate);
                 Validate(candidate);
                 state=candidate; return true;
             }
@@ -74,8 +90,18 @@ namespace Riverworks
         }
         public static void Validate(GameState state)
         {
-            if(state==null || state.Version!=4 || state.Size!=ExpectedSize) throw new InvalidDataException("지원하지 않는 도시 형식입니다.");
-            int resourceCount = Enum.GetValues(typeof(Resource)).Length;
+            ValidateState(state,6,false);
+        }
+
+        static void ValidateVersion5(GameState state)
+        {
+            ValidateState(state,5,true);
+        }
+
+        static void ValidateState(GameState state,int expectedVersion,bool frozenVersion5)
+        {
+            if(state==null || state.Version!=expectedVersion || state.Size!=ExpectedSize) throw new InvalidDataException("지원하지 않는 도시 형식입니다.");
+            int resourceCount = ResourceCatalog.Count;
             if(!FiniteNonnegative(state.DayProgressSeconds)||state.DayProgressSeconds>=GameController.SecondsPerDay)throw new InvalidDataException("도시 시간 진행값이 올바르지 않습니다.");
             if(state.Cells==null || state.Cells.Count!=ExpectedSize*ExpectedSize || state.Stock==null || state.Stock.Count!=resourceCount) throw new InvalidDataException("도시 데이터가 완전하지 않습니다.");
             // Tutorial validation is read-only and runs before validators that may normalize
@@ -91,13 +117,17 @@ namespace Riverworks
             if (state.Milestone < 0 || state.Milestone > 5 || state.Won != (state.Milestone == 5)) throw new InvalidDataException("목표 진행 데이터가 올바르지 않습니다.");
             ValidateTechnology(state);
             if(state.Factory==null) throw new InvalidDataException("공장 저장 데이터가 없습니다.");
-            FactorySimulation.ValidateState(state.Factory);
+            if(frozenVersion5)FactoryStateValidation.ValidateVersion2(state.Factory);else FactoryStateValidation.Validate(state.Factory);
             if(state.Factory.Width!=42||state.Factory.Height!=42)throw new InvalidDataException("공장 설비는 도시 공유 부지에 있어야 합니다.");
             foreach(var entity in state.Factory.Entities)
             {
                 var spec=entity==null?null:FactoryCatalog.Get(entity.Kind);
                 if(spec==null)throw new InvalidDataException("알 수 없는 공장 설비입니다.");
                 if(!TechCatalog.Has(state,spec.RequiredTech))throw new InvalidDataException("연구하지 않은 공장 설비입니다.");
+                var recipe=FactoryCatalog.GetRecipe(entity.Recipe);
+                if(recipe!=null&&!TechCatalog.Has(state,recipe.RequiredTech))throw new InvalidDataException("연구하지 않은 제조법입니다.");
+                if(entity.ClockPercent>100&&!TechCatalog.Has(state,TechId.AdvancedManufacturing))throw new InvalidDataException("고급 제조 연구 없이 과클럭한 설비입니다.");
+                if(entity.ControllerInstalled&&!TechCatalog.Has(state,TechId.IndustrialControl))throw new InvalidDataException("산업 제어 연구 없이 설치된 자동화 제어기입니다.");
             }
             if(state.OwnedRegions==null || !state.OwnedRegions.Contains(4)) throw new InvalidDataException("시작 구역이 없습니다.");
             var regions=new HashSet<int>();
@@ -121,10 +151,55 @@ namespace Riverworks
             var environment=new CityLogistics(state);
             foreach(var entity in state.Factory.Entities)
             {
-                if(!environment.CanPlace(entity.Kind,entity.X,entity.Z,entity.Direction,out var placement))throw new InvalidDataException(placement);
-                if(entity.Kind==FactoryKind.Drill&&!environment.HasOre(entity.X,entity.Z))throw new InvalidDataException("채굴기가 도시 바위에 연결되지 않았습니다.");
+                if(entity.Floor==0&&!environment.CanPlace(entity.Kind,entity.X,entity.Z,entity.Direction,out var placement))throw new InvalidDataException(placement);
+                var recipe=entity.Kind==FactoryKind.Drill&&entity.Recipe==FactoryRecipe.None?FactoryCatalog.GetRecipe(FactoryRecipe.IronMining):FactoryCatalog.GetRecipe(entity.Recipe);
+                if(recipe!=null&&recipe.IsExtraction)
+                {
+                    bool source=recipe.SourceResource==Resource.Water?environment.HasWater(entity.X,entity.Z):environment.HasDeposit(recipe.SourceResource,entity.X,entity.Z);
+                    if(!source)throw new InvalidDataException("추출 설비가 알맞은 자원 위에 있지 않습니다.");
+                }
             }
-            if(state.ArchivedFactory!=null)FactorySimulation.ValidateState(state.ArchivedFactory);
+            if(state.ArchivedFactory!=null&&!IsAbsentLegacyFactoryPlaceholder(state.ArchivedFactory))
+            {
+                if(frozenVersion5)FactoryStateValidation.ValidateVersion2(state.ArchivedFactory);else FactoryStateValidation.Validate(state.ArchivedFactory);
+                ValidateFactoryTechnology(state,state.ArchivedFactory);
+            }
+            if(frozenVersion5)
+            {
+                if(state.CityProjects!=null&&state.CityProjects.Count!=0)throw new InvalidDataException("Version 5 city contains expansion projects.");
+            }
+            else
+            {
+                FactoryLayers.ValidateCity(state);
+                CityProjects.Validate(state);
+                foreach(var project in state.CityProjects)
+                {
+                    var projectSpec=project==null?null:CityProjects.Get(project.Kind);
+                    if(projectSpec==null||!TechCatalog.Has(state,projectSpec.RequiredTech))throw new InvalidDataException("연구하지 않은 도시 프로젝트입니다.");
+                }
+                ValidateExpansionTechnology(state,state.Factory);
+                if(state.ArchivedFactory!=null&&!IsAbsentLegacyFactoryPlaceholder(state.ArchivedFactory))ValidateExpansionTechnology(state,state.ArchivedFactory);
+            }
+        }
+
+        static void ValidateExpansionTechnology(GameState game,FactoryState factory)
+        {
+            if(factory.Platforms.Any(platform=>platform.Floor==1)&&!TechCatalog.Has(game,TechId.MassProduction))throw new InvalidDataException("대량 생산 연구 없이 2층 플랫폼이 있습니다.");
+            if(factory.Platforms.Any(platform=>platform.Floor==2)&&!TechCatalog.Has(game,TechId.AdvancedManufacturing))throw new InvalidDataException("고급 제조 연구 없이 3층 플랫폼이 있습니다.");
+            if((factory.AutomationRules.Count>0||factory.Entities.Any(entity=>entity.ControllerInstalled))&&!TechCatalog.Has(game,TechId.IndustrialControl))throw new InvalidDataException("산업 제어 연구 없이 자동화 상태가 있습니다.");
+        }
+
+        static void ValidateFactoryTechnology(GameState game,FactoryState factory)
+        {
+            foreach(var entity in factory.Entities)
+            {
+                var spec=entity==null?null:FactoryCatalog.Get(entity.Kind);
+                if(spec==null||!TechCatalog.Has(game,spec.RequiredTech))throw new InvalidDataException("연구하지 않은 보관 공장 설비입니다.");
+                var recipe=FactoryCatalog.GetRecipe(entity.Recipe);
+                if(recipe!=null&&!TechCatalog.Has(game,recipe.RequiredTech))throw new InvalidDataException("연구하지 않은 보관 공장 제조법입니다.");
+                if(entity.ClockPercent>100&&!TechCatalog.Has(game,TechId.AdvancedManufacturing))throw new InvalidDataException("고급 제조 연구 없이 과클럭한 보관 설비입니다.");
+                if(entity.ControllerInstalled&&!TechCatalog.Has(game,TechId.IndustrialControl))throw new InvalidDataException("산업 제어 연구 없이 설치된 보관 공장 제어기입니다.");
+            }
         }
 
         static void NormalizeAbsentTutorial(GameState state)
@@ -141,13 +216,14 @@ namespace Riverworks
         }
         static void ValidateCityBuffer(List<float> values)
         {
-            if(values==null||values.Count!=9||values[0]!=0)throw new InvalidDataException("도시 물류 버퍼가 올바르지 않습니다.");
+            if(values==null||values.Count!=ResourceCatalog.Count||values[0]!=0)throw new InvalidDataException("도시 물류 버퍼가 올바르지 않습니다.");
             float total=0;foreach(float value in values){if(!FiniteNonnegative(value))throw new InvalidDataException("도시 물류 수량이 올바르지 않습니다.");total+=value;}
             if(total>CityLogistics.BufferCapacity+.001f)throw new InvalidDataException("도시 물류 버퍼 용량 초과입니다.");
         }
         static void ValidateLegacyData(GameState state)
         {
-            if(state.Size!=21||state.Cells==null||state.Cells.Count!=441||state.Stock==null||state.Stock.Count!=9||!FiniteNonnegative(state.Coins)||state.Population<0||state.Day<0)throw new InvalidDataException("이전 도시 데이터가 올바르지 않습니다.");
+            if(state.Size!=21||state.Cells==null||state.Cells.Count!=441||state.Stock==null||state.Stock.Count!=ResourceCatalog.LegacyCount||!FiniteNonnegative(state.Coins)||state.Population<0||state.Day<0)throw new InvalidDataException("이전 도시 데이터가 올바르지 않습니다.");
+            if(state.CityProjects!=null&&state.CityProjects.Count!=0)throw new InvalidDataException("이전 도시에 확장 프로젝트가 포함되어 있습니다.");
             foreach(float value in state.Stock)if(!FiniteNonnegative(value))throw new InvalidDataException("이전 도시 재고가 올바르지 않습니다.");
             if(Math.Abs(state.Stock[0]-state.Coins)>.01f)throw new InvalidDataException("이전 도시 코인 값이 일치하지 않습니다.");
             if(state.OwnedRegions==null||!state.OwnedRegions.Contains(4))throw new InvalidDataException("이전 도시 영토가 없습니다.");
@@ -155,10 +231,58 @@ namespace Riverworks
             for(int i=0;i<441;i++)
             {
                 var c=state.Cells[i];if(c==null||c.X!=i%21||c.Z!=i/21||!Enum.IsDefined(typeof(BuildingKind),c.Building)||!Enum.IsDefined(typeof(TerrainKind),c.Terrain)||c.Level<0||c.Level>3||!FiniteNonnegative(c.Progress))throw new InvalidDataException("이전 도시 타일이 올바르지 않습니다.");
+                ValidateLegacyCityBuffer(c.LogisticsInput);ValidateLegacyCityBuffer(c.LogisticsOutput);
             }
-            if(state.Version>=2)ValidateTechnology(state);
-            if(state.Version==3&&state.Factory==null)throw new InvalidDataException("이전 공장 데이터가 없습니다.");
-            if(state.Factory!=null)FactorySimulation.ValidateState(state.Factory);
+            if(state.Version>=2)
+            {
+                if(state.Technologies!=null&&state.Technologies.Any(id=>(int)id>(int)TechId.Automation) || (int)state.ActiveResearch>(int)TechId.Automation)
+                    throw new InvalidDataException("이전 도시에 새 산업 기술 ID가 포함되어 있습니다.");
+                ValidateTechnology(state);
+            }
+            if(state.Version>=3)
+            {
+                if(state.Factory==null)throw new InvalidDataException("이전 공장 데이터가 없습니다.");
+                FactoryStateValidation.ValidateLegacy(state.Factory);
+                if(state.ArchivedFactory!=null&&!IsAbsentLegacyFactoryPlaceholder(state.ArchivedFactory))FactoryStateValidation.ValidateLegacy(state.ArchivedFactory);
+            }
+        }
+
+        static void NormalizeAbsentLegacyFactories(GameState state)
+        {
+            // Unity's inline serializer writes a null class field back as a constructed empty
+            // object. Recognize only the two exact empty shapes it can produce. This happens
+            // after the legacy state has been checked read-only, so malformed real archives are
+            // never repaired or discarded before validation.
+            if(state!=null&&IsAbsentLegacyFactoryPlaceholder(state.ArchivedFactory))state.ArchivedFactory=null;
+        }
+
+        static bool IsAbsentLegacyFactoryPlaceholder(FactoryState factory)
+        {
+            if(factory==null)return true;
+            bool noEntities=factory.Entities==null||factory.Entities.Count==0;
+            bool serializerDefaults=factory.Version==0&&factory.Width==0&&factory.Height==0&&factory.NextEntityId==0&&factory.PowerBudget==0&&
+                (factory.Produced==null||factory.Produced.Count==0)&&(factory.Exported==null||factory.Exported.Count==0)&&(factory.Recovered==null||factory.Recovered.Count==0)&&
+                (factory.Platforms==null||factory.Platforms.Count==0)&&(factory.AutomationRules==null||factory.AutomationRules.Count==0)&&factory.NextAutomationRuleId==0;
+            bool oldInitializedDefaults=factory.Version==2&&factory.Width==24&&factory.Height==16&&factory.NextEntityId==1&&factory.PowerBudget==20&&
+                IsZeroInventory(factory.Produced,ResourceCatalog.Count)&&IsZeroInventory(factory.Exported,ResourceCatalog.Count)&&IsZeroInventory(factory.Recovered,ResourceCatalog.Count)&&
+                (factory.Platforms==null||factory.Platforms.Count==0)&&(factory.AutomationRules==null||factory.AutomationRules.Count==0)&&(factory.NextAutomationRuleId==0||factory.NextAutomationRuleId==1);
+            bool expansionInitializedDefaults=factory.Version==3&&factory.Width==24&&factory.Height==16&&factory.NextEntityId==1&&factory.PowerBudget==20&&
+                IsZeroInventory(factory.Produced,ResourceCatalog.Count)&&IsZeroInventory(factory.Exported,ResourceCatalog.Count)&&IsZeroInventory(factory.Recovered,ResourceCatalog.Count)&&
+                factory.Platforms!=null&&factory.Platforms.Count==0&&factory.AutomationRules!=null&&factory.AutomationRules.Count==0&&factory.NextAutomationRuleId==1;
+            return noEntities&&factory.ElapsedSeconds==0&&(serializerDefaults||oldInitializedDefaults||expansionInitializedDefaults);
+        }
+
+        static bool IsZeroInventory(List<int> values,int width)
+        {
+            if(values==null||values.Count!=width)return false;
+            foreach(int value in values)if(value!=0)return false;
+            return true;
+        }
+        static void ValidateLegacyCityBuffer(List<float> values)
+        {
+            if(values==null||values.Count!=ResourceCatalog.LegacyCount||values[0]!=0)throw new InvalidDataException("이전 도시 물류 버퍼 너비가 올바르지 않습니다.");
+            float total=0;foreach(float value in values){if(!FiniteNonnegative(value))throw new InvalidDataException("이전 도시 물류 버퍼가 올바르지 않습니다.");total+=value;}
+            if(total>CityLogistics.BufferCapacity+.001f)throw new InvalidDataException("이전 도시 물류 버퍼 용량을 초과했습니다.");
         }
         static void ValidateTechnology(GameState state)
         {

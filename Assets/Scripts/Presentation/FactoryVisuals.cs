@@ -13,9 +13,12 @@ namespace Riverworks
         internal sealed class Palette
         {
             public Material Slate, Dark, Brass, Belt, Teal, Orange, Violet, Blue, Iron, Wood, Flour, Bread, Ore, Steel, Tools, White;
+            public readonly Dictionary<Resource,Material> Resources=new Dictionary<Resource,Material>();
 
             public Material ForResource(Resource resource)
             {
+                Material catalogMaterial;
+                if(Resources.TryGetValue(resource,out catalogMaterial)) return catalogMaterial;
                 switch(resource)
                 {
                     case Resource.Timber: return Wood;
@@ -37,7 +40,7 @@ namespace Riverworks
             root.transform.SetParent(parent,false);
             var visual=new GameObject("Directional model").transform; visual.SetParent(root.transform,false);
             var spec=FactoryCatalog.Get(entity.Kind);
-            bool large=entity.Kind==FactoryKind.Drill || entity.Kind==FactoryKind.Furnace || entity.Kind==FactoryKind.Assembler || entity.Kind==FactoryKind.ImportDock || entity.Kind==FactoryKind.ExportDock || entity.Kind==FactoryKind.PowerInlet;
+            bool large=spec!=null&&(spec.Width>1||spec.Height>1);
             bool raisedTransport=entity.Kind==FactoryKind.Belt||entity.Kind==FactoryKind.Splitter||entity.Kind==FactoryKind.Inserter;
             visual.localPosition=new Vector3(spec==null?0:(spec.Width-1)*.5f,raisedTransport?TransportLift:0,spec==null?0:(spec.Height-1)*.5f);
             visual.localRotation=Quaternion.Euler(0,90-90*entity.Direction,0);
@@ -54,9 +57,27 @@ namespace Riverworks
                 case FactoryKind.ExportDock: Dock(visual,p,false); break;
                 case FactoryKind.PowerInlet: PowerInlet(visual,p); break;
                 case FactoryKind.Pole: Pole(visual,p); break;
+                case FactoryKind.Pipe: Pipe(visual,p,false); break;
+                case FactoryKind.PipeJunction: Pipe(visual,p,true); break;
+                case FactoryKind.FluidTank: FluidTank(visual,p); break;
+                case FactoryKind.WaterPump: WaterPump(visual,p); break;
+                case FactoryKind.OilPump: OilPump(visual,p); break;
+                case FactoryKind.Foundry: Foundry(visual,p); break;
+                case FactoryKind.MachiningBench: MachiningBench(visual,p); break;
+                case FactoryKind.Refinery: Refinery(visual,p); break;
+                case FactoryKind.ChemicalPlant: ChemicalPlant(visual,p); break;
+                case FactoryKind.Manufacturer: Manufacturer(visual,p); break;
+                case FactoryKind.ItemLift: ItemLift(visual,p,entity.IsLinkSender); break;
+                case FactoryKind.FluidRiser: FluidRiser(visual,p,entity.IsLinkSender); break;
             }
-            if(entity.Kind!=FactoryKind.Pole && entity.Kind!=FactoryKind.PowerInlet)
+            if(entity.Kind!=FactoryKind.Pole && entity.Kind!=FactoryKind.PowerInlet &&
+               entity.Kind!=FactoryKind.Pipe && entity.Kind!=FactoryKind.PipeJunction && entity.Kind!=FactoryKind.FluidTank &&
+               entity.Kind!=FactoryKind.ItemLift && entity.Kind!=FactoryKind.FluidRiser)
                 Arrow(visual,p.Brass,p.Dark,entity.Kind==FactoryKind.Splitter,large);
+            if((int)entity.Kind>=(int)FactoryKind.WaterPump||entity.ControllerInstalled)
+                Box(visual,"Machine status beacon",new Vector3(.20f,.12f,.20f),new Vector3(.68f,1.08f,.68f),p.Teal);
+            if(entity.ControllerInstalled)
+                Box(visual,"Automation controller badge",new Vector3(.30f,.24f,.06f),new Vector3(-.68f,.72f,.72f),p.Violet);
             return root;
         }
 
@@ -138,6 +159,136 @@ namespace Riverworks
             Box(r,"Crossbar",new Vector3(.76f,.09f,.09f),new Vector3(0,1.45f,0),p.Brass);
             for(int x=-1;x<=1;x+=2) Cylinder(r,"Insulator",.06f,.16f,new Vector3(x*.29f,1.56f,0),p.White);
         }
+
+        static void Pipe(Transform r,Palette p,bool junction)
+        {
+            Cylinder(r,"Pipe tube",.13f,.88f,new Vector3(0,.24f,0),p.Iron,Quaternion.Euler(90,0,0));
+            for(int z=-1;z<=1;z+=2) Cylinder(r,"Pipe flange",.19f,.07f,new Vector3(0,.24f,z*.43f),p.Brass,Quaternion.Euler(90,0,0));
+            if(junction)
+            {
+                Cylinder(r,"Left branch tube",.13f,.52f,new Vector3(-.25f,.24f,.12f),p.Iron,Quaternion.Euler(0,0,90));
+                Cylinder(r,"Left branch flange",.19f,.07f,new Vector3(-.49f,.24f,.12f),p.Brass,Quaternion.Euler(0,0,90));
+            }
+            FlowPulse(r,p.White,new Vector3(0,.24f,.05f));
+            Arrow(r,p.Teal,p.Dark,junction,false);
+        }
+
+        static void FluidTank(Transform r,Palette p)
+        {
+            Cylinder(r,"Tank shell",.40f,.76f,new Vector3(0,.48f,0),p.Slate);
+            Cylinder(r,"Tank fluid fill",.065f,.58f,new Vector3(.43f,.39f,0),p.White);
+            Cylinder(r,"Tank roof",.43f,.08f,new Vector3(0,.90f,0),p.Dark);
+            for(int x=-1;x<=1;x+=2) Box(r,"Tank foot",new Vector3(.12f,.22f,.12f),new Vector3(x*.27f,.11f,0),p.Brass);
+            Cylinder(r,"Tank outlet",.11f,.38f,new Vector3(0,.20f,.35f),p.Iron,Quaternion.Euler(90,0,0));
+            FlowPulse(r,p.White,new Vector3(0,.20f,.45f));
+            Arrow(r,p.Teal,p.Dark,false,false);
+        }
+
+        static void WaterPump(Transform r,Palette p)
+        {
+            Base2(r,p.Dark); Box(r,"Pump housing",new Vector3(.92f,.62f,.72f),new Vector3(0,.43f,.08f),p.Blue);
+            Cylinder(r,"Water impeller",.34f,.18f,new Vector3(0,.53f,.48f),p.Teal,Quaternion.Euler(90,0,0));
+            Cylinder(r,"Intake well",.30f,.22f,new Vector3(-.48f,.23f,-.38f),p.Iron);
+            PipeRun(r,p.Iron,new Vector3(-.48f,.48f,-.30f),Quaternion.Euler(45,0,0));
+        }
+
+        static void OilPump(Transform r,Palette p)
+        {
+            Base2(r,p.Dark); Cylinder(r,"Pumpjack pivot",.12f,.82f,new Vector3(-.42f,.54f,-.18f),p.Brass);
+            var arm=new GameObject("Animated arm").transform; arm.SetParent(r,false); arm.localPosition=new Vector3(-.42f,.90f,-.18f);
+            Box(arm,"Walking beam",new Vector3(1.38f,.13f,.18f),new Vector3(.40f,0,0),p.Slate);
+            Box(arm,"Horse head",new Vector3(.18f,.58f,.28f),new Vector3(1.05f,-.16f,0),p.Dark);
+            Box(r,"Counterweight",new Vector3(.38f,.42f,.32f),new Vector3(-.64f,.76f,-.18f),p.Orange);
+            Cylinder(r,"Oil well",.24f,.28f,new Vector3(.62f,.23f,-.18f),p.Iron);
+        }
+
+        static void Foundry(Transform r,Palette p)
+        {
+            Base2(r,p.Dark); Cylinder(r,"Foundry crucible",.55f,.88f,new Vector3(-.20f,.57f,0),p.Slate);
+            Box(r,"Molten metal",new Vector3(.72f,.08f,.72f),new Vector3(-.20f,1.03f,0),p.Orange);
+            Box(r,"Casting bed",new Vector3(.62f,.18f,1.28f),new Vector3(.58f,.28f,.06f),p.Iron);
+            Cylinder(r,"Foundry stack",.18f,1.22f,new Vector3(-.63f,.81f,-.58f),p.Dark);
+        }
+
+        static void MachiningBench(Transform r,Palette p)
+        {
+            Base2(r,p.Dark); Box(r,"Machine bed",new Vector3(1.48f,.32f,.76f),new Vector3(0,.34f,0),p.Slate);
+            Box(r,"Sliding carriage",new Vector3(.52f,.20f,.68f),new Vector3(-.32f,.58f,0),p.Teal);
+            Cylinder(r,"Lathe chuck",.27f,.20f,new Vector3(.48f,.63f,0),p.Brass,Quaternion.Euler(0,0,90));
+            Cylinder(r,"Work spindle",.10f,.72f,new Vector3(.06f,.63f,0),p.Steel,Quaternion.Euler(0,0,90));
+            Box(r,"Control stand",new Vector3(.28f,.68f,.30f),new Vector3(.66f,.54f,-.54f),p.Blue);
+        }
+
+        static void Refinery(Transform r,Palette p)
+        {
+            Base2(r,p.Dark); Cylinder(r,"Tall distillation column",.28f,1.72f,new Vector3(-.43f,.95f,-.12f),p.Iron);
+            Cylinder(r,"Short distillation column",.38f,1.15f,new Vector3(.38f,.66f,.20f),p.Slate);
+            for(int y=0;y<4;y++) Cylinder(r,"Column tray",.34f,.045f,new Vector3(-.43f,.38f+y*.39f,-.12f),p.Brass);
+            PipeRun(r,p.Teal,new Vector3(0,.78f,-.18f),Quaternion.Euler(0,0,90));
+            Box(r,"Refinery furnace",new Vector3(.52f,.52f,.52f),new Vector3(.45f,.36f,-.53f),p.Orange);
+        }
+
+        static void ChemicalPlant(Transform r,Palette p)
+        {
+            Base2(r,p.Dark);
+            for(int x=-1;x<=1;x+=2) { Cylinder(r,"Reaction vessel",.38f,.92f,new Vector3(x*.43f,.58f,0),x<0?p.Teal:p.Violet); Cylinder(r,"Vessel cap",.42f,.07f,new Vector3(x*.43f,1.06f,0),p.Brass); }
+            PipeRun(r,p.Iron,new Vector3(0,1.13f,0),Quaternion.Euler(0,0,90));
+            Box(r,"Chemical control cabinet",new Vector3(.76f,.48f,.24f),new Vector3(0,.43f,-.66f),p.Blue);
+        }
+
+        static void Manufacturer(Transform r,Palette p)
+        {
+            Base2(r,p.Dark); Box(r,"Manufacturer enclosure",new Vector3(1.50f,.78f,1.34f),new Vector3(0,.50f,0),p.Blue);
+            Box(r,"Assembly conveyor",new Vector3(.42f,.12f,1.52f),new Vector3(0,.48f,.15f),p.Belt);
+            for(int x=-1;x<=1;x+=2)
+            {
+                Cylinder(r,"Robot pedestal",.15f,.22f,new Vector3(x*.48f,.83f,-.22f),p.Brass);
+                var robot=new GameObject("Robot bank").transform; robot.SetParent(r,false); robot.localPosition=new Vector3(x*.48f,.98f,-.22f);
+                Box(robot,"Robot upper arm",new Vector3(.13f,.48f,.13f),new Vector3(0,.18f,.10f),p.Teal);
+                Box(robot,"Robot forearm",new Vector3(.12f,.12f,.52f),new Vector3(-x*.06f,.37f,.31f),p.Iron);
+            }
+            Box(r,"Manufacturer status bar",new Vector3(1.16f,.10f,.06f),new Vector3(0,1.00f,.69f),p.Violet);
+        }
+
+        static void ItemLift(Transform r,Palette p,bool sender)
+        {
+            Box(r,"Lift landing",new Vector3(.86f,.10f,.86f),new Vector3(0,.08f,0),p.Dark);
+            for(int x=-1;x<=1;x+=2) Box(r,"Lift frame",new Vector3(.08f,1.30f,.08f),new Vector3(x*.36f,.70f,-.34f),p.Brass);
+            Box(r,"Lift crossbar",new Vector3(.82f,.08f,.08f),new Vector3(0,1.34f,-.34f),p.Brass);
+            Box(r,"Lift cage",new Vector3(.62f,.52f,.58f),new Vector3(0,.40f,.02f),sender?p.Teal:p.Blue);
+            if(sender)
+            {
+                var span=new GameObject("Vertical link span").transform; span.SetParent(r,false);
+                for(int x=-1;x<=1;x+=2) Box(span,"Vertical lift rail",new Vector3(.07f,3.10f,.07f),new Vector3(x*.34f,1.55f,-.32f),p.Iron);
+                Box(span,"Moving lift cargo",new Vector3(.34f,.34f,.34f),new Vector3(0,.35f,.02f),p.White).SetActive(false);
+                Box(r,"Vertical direction stem",new Vector3(.08f,.42f,.08f),new Vector3(0,.92f,.38f),p.Teal);
+                var up=Box(r,"Vertical direction head",new Vector3(.22f,.22f,.22f),new Vector3(0,1.18f,.38f),p.Teal); up.transform.localRotation=Quaternion.Euler(0,45,0);
+            }
+            else Arrow(r,p.Teal,p.Dark,false,false);
+        }
+
+        static void FluidRiser(Transform r,Palette p,bool sender)
+        {
+            Cylinder(r,"Riser landing flange",.32f,.10f,new Vector3(0,.12f,0),p.Brass);
+            Cylinder(r,"Riser elbow",.15f,.70f,new Vector3(0,.40f,.18f),p.Iron,Quaternion.Euler(90,0,0));
+            if(sender)
+            {
+                var span=new GameObject("Vertical link span").transform; span.SetParent(r,false);
+                Cylinder(span,"Vertical riser pipe",.14f,3.10f,new Vector3(0,1.55f,0),p.Iron);
+                for(int y=0;y<=3;y++) Cylinder(span,"Riser coupling",.21f,.07f,new Vector3(0,y*1.03f,0),p.Brass);
+                Cylinder(span,"Vertical fluid pulse",.09f,.12f,new Vector3(0,.25f,0),p.White);
+            }
+            if(!sender) Arrow(r,p.Teal,p.Dark,false,false);
+        }
+
+        static void FlowPulse(Transform r,Material material,Vector3 position)
+        {
+            var pulse=Cylinder(r,"Fluid flow pulse",.075f,.10f,position,material,Quaternion.Euler(90,0,0));
+            pulse.GetComponent<Renderer>().shadowCastingMode=ShadowCastingMode.Off;
+        }
+
+        static void PipeRun(Transform r,Material material,Vector3 position,Quaternion rotation)
+        { Cylinder(r,"Process pipe",.09f,.92f,position,material,rotation); }
 
         static void Base2(Transform r,Material m) { Box(r,"Machine foundation",new Vector3(1.82f,.16f,1.82f),new Vector3(0,.09f,0),m); }
         static void Arrow(Transform r,Material bright,Material backing,bool branch,bool large)

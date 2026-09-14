@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '0.7.0',
+    [string]$Version = '0.9.0',
 
     [string]$WindowsBuildPath,
 
@@ -149,6 +149,10 @@ $documentMap = [ordered]@{
     'VERIFICATION.md' = 'Docs\VERIFICATION.md'
     'UI_POLISH.ko.md' = 'Docs\UI_POLISH.ko.md'
     'RESEARCH_TREE.ko.md' = 'Docs\RESEARCH_TREE.ko.md'
+    'INDUSTRY_GUIDE.ko.md' = 'Docs\INDUSTRY_GUIDE.ko.md'
+    'EXPANSION_GUIDE.ko.md' = 'Docs\EXPANSION_GUIDE.ko.md'
+    'Images\expansion-v0.9.png' = 'Docs\Images\expansion-v0.9.png'
+    'Images\industry-v0.8.png' = 'Docs\Images\industry-v0.8.png'
     'Images\research-tree-v0.7.png' = 'Docs\Images\research-tree-v0.7.png'
     'Images\research-v0.6.2.png' = 'Docs\Images\research-v0.6.2.png'
     'Images\guidance-v0.6.2.png' = 'Docs\Images\guidance-v0.6.2.png'
@@ -213,6 +217,8 @@ Riverworks v$Version - Windows x64
 주요 안내
 - PLAYER_GUIDE.ko.md: 조작과 기본 플레이
 - FACTORY_GUIDE.ko.md: 공장 배치, 생산, 업그레이드
+- INDUSTRY_GUIDE.ko.md: 복합 제조법, 유체, 부산물과 재활용
+- EXPANSION_GUIDE.ko.md: 도시 프로젝트, 3층 공장과 조건 자동화
 - TUTORIAL_GUIDE.ko.md: 튜토리얼 진행
 - RESIDENT_VISUALS.ko.md: 주민 역할과 행동 표시
 - RESIDENT_AI.ko.md: 주민 AI 기능과 로컬 게이트웨이 설정

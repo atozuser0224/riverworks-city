@@ -12,6 +12,8 @@ namespace Riverworks
         public int ResearchCost, CoinCost, DurationDays;
         public TechId[] Prerequisites = Array.Empty<TechId>();
         public BuildingKind[] UnlockBuildings = Array.Empty<BuildingKind>();
+        public FactoryKind[] UnlockFactories = Array.Empty<FactoryKind>();
+        public FactoryRecipe[] UnlockRecipes = Array.Empty<FactoryRecipe>();
     }
 
     public static class TechCatalog
@@ -35,8 +37,25 @@ namespace Riverworks
             Spec(TechId.MetallurgicalEfficiency, "금속 공정 효율", "선광과 제련 공정을 개선해 금속 생산 손실을 줄입니다.", "광산·제련소 생산량 +20%", Era.Renaissance, 13, 145, 4, new[] { TechId.Metallurgy }),
             Spec(TechId.Electrification, "전기화", "동력망을 전기로 전환해 공장 전력 손실을 줄입니다.", "공장 전력 수요 -15%", Era.Industrial, 16, 190, 5, new[] { TechId.SteamPower }),
             Spec(TechId.MassProduction, "대량 생산", "부품 규격과 조립 공정을 표준화합니다.", "공장 기계 제작 속도 +25%", Era.Industrial, 17, 210, 5, new[] { TechId.Toolmaking }),
-            Spec(TechId.Automation, "자동화", "감지와 제어 장치로 공장 운반을 자동화합니다.", "공장 투입기 속도 +50%", Era.Industrial, 20, 260, 6, new[] { TechId.Electrification, TechId.MassProduction })
+            Spec(TechId.Automation, "자동화", "감지와 제어 장치로 공장 운반을 자동화합니다.", "공장 투입기 속도 +50%", Era.Industrial, 20, 260, 6, new[] { TechId.Electrification, TechId.MassProduction }),
+            Spec(TechId.FluidHandling,"유체 처리","파이프와 펌프로 산업용 유체를 운반합니다.","파이프·탱크·물 펌프·정유소",Era.Industrial,15,180,4,new[]{TechId.SteamPower,TechId.Logistics}),
+            Spec(TechId.OilRefining,"석유 정제","원유를 분리하고 석유 원료를 확보합니다.","원유 펌프와 원유 정제",Era.Industrial,17,220,5,new[]{TechId.FluidHandling,TechId.MetallurgicalEfficiency}),
+            Spec(TechId.Petrochemistry,"석유화학","석유 원료로 화학 소재를 합성합니다.","화학 공장과 석유화학 공정",Era.Industrial,18,245,5,new[]{TechId.OilRefining}),
+            Spec(TechId.Electronics,"전자공학","배선과 회로를 정밀 조립합니다.","모터·회로·고급 회로",Era.Industrial,19,270,5,new[]{TechId.Petrochemistry,TechId.Toolmaking}),
+            Spec(TechId.AluminumProcessing,"알루미늄 가공","보크사이트를 경량 금속으로 정제합니다.","알루미늄 생산 공정",Era.Industrial,19,275,5,new[]{TechId.FluidHandling,TechId.MetallurgicalEfficiency}),
+            Spec(TechId.EnergyStorage,"에너지 저장","산업용 전지를 안정적으로 생산합니다.","배터리 조립",Era.Industrial,21,310,6,new[]{TechId.AluminumProcessing,TechId.Petrochemistry}),
+            Spec(TechId.AdvancedManufacturing,"고급 제조","복합 생산 라인을 고속으로 제어합니다.","제조기·컴퓨터·재생 공정·고급 클록",Era.Industrial,23,350,6,new[]{TechId.Electronics,TechId.MassProduction}),
+            Spec(TechId.IndustrialControl,"산업 제어","도시 전체의 복잡한 생산망을 통합합니다.","제어 장치 조립",Era.Industrial,26,420,7,new[]{TechId.AdvancedManufacturing,TechId.EnergyStorage,TechId.Automation})
         };
+
+        static TechCatalog()
+        {
+            foreach (TechSpec tech in Specs)
+            {
+                tech.UnlockFactories=FactoryCatalog.All.Where(f=>f.RequiredTech==tech.Id).Select(f=>f.Kind).ToArray();
+                tech.UnlockRecipes=FactoryCatalog.Recipes.Where(r=>r.RequiredTech==tech.Id).Select(r=>r.Id).ToArray();
+            }
+        }
 
         public static IEnumerable<TechSpec> All => Specs;
         public static TechSpec Get(TechId id) => Specs.FirstOrDefault(s => s.Id == id);
@@ -46,6 +65,8 @@ namespace Riverworks
             TechSpec spec = Specs.FirstOrDefault(s => s.UnlockBuildings.Contains(kind));
             return spec == null ? TechId.None : spec.Id;
         }
+        public static TechId RequiredTechnology(FactoryKind kind) => FactoryCatalog.Get(kind)?.RequiredTech ?? TechId.None;
+        public static TechId RequiredTechnology(FactoryRecipe recipe) => FactoryCatalog.GetRecipe(recipe)?.RequiredTech ?? TechId.None;
         public static bool Has(GameState state, TechId id) => id == TechId.None || (state?.Technologies?.Contains(id) ?? false);
 
         public static void MigrateLegacy(GameState state)
@@ -55,7 +76,7 @@ namespace Riverworks
             if (state.Version == 1)
             {
                 state.Technologies.Clear();
-                state.Technologies.AddRange(Specs.Select(s => s.Id));
+                state.Technologies.AddRange(Specs.Where(s => s.Id <= TechId.Automation).Select(s => s.Id));
                 state.Era = Era.Industrial;
                 state.ActiveResearch = TechId.None;
                 state.ResearchDaysRemaining = 0;

@@ -24,9 +24,9 @@ public static class CityLogisticsChecks
     static void NewGamesUseTheSharedCityGrid()
     {
         GameState state = GameState.CreateNew();
-        True(state.Version == 4 && state.Factory != null && state.Factory.Width == 42 && state.Factory.Height == 42,
+        True(state.Version == 6 && state.Factory != null && state.Factory.Version == 3 && state.Factory.Width == 42 && state.Factory.Height == 42,
             "new games use the 42x42 factory grid over the 21x21 city");
-        True(state.Cells.All(cell => cell.LogisticsInput.Count == 9 && cell.LogisticsOutput.Count == 9),
+        True(state.Cells.All(cell => cell.LogisticsInput.Count == ResourceCatalog.Count && cell.LogisticsOutput.Count == ResourceCatalog.Count),
             "every city lot starts with fixed physical input and output buffers");
     }
 
@@ -214,7 +214,7 @@ public static class CityLogisticsChecks
         old.Produced[(int)Resource.Tools] = 9;
         old.Exported[(int)Resource.Tools] = 4;
         old.ElapsedSeconds = 42.5f;
-        state.Version = 3;
+        MakeLegacy(state,old,3);
         state.Factory = old;
         state.ArchivedFactory = null;
         float coins = state.Coins, timber = state.Stock[(int)Resource.Timber], stone = state.Stock[(int)Resource.Stone];
@@ -222,7 +222,7 @@ public static class CityLogisticsChecks
 
         _ = new Simulation(state);
 
-        True(state.Version == 4 && ReferenceEquals(state.ArchivedFactory, old) && state.Factory.Width == 42 && state.Factory.Height == 42,
+        True(state.Version == 6 && state.Factory != null && state.Factory.Version == 3 && state.ArchivedFactory != null && state.ArchivedFactory.Version == 3 && ReferenceEquals(state.ArchivedFactory, old) && state.Factory.Width == 42 && state.Factory.Height == 42,
             "v3 migration archives the exact old interior and activates shared city geometry");
         True(old.Entities.Count == 2 && old.Entities[0].Input[(int)Resource.Grain] == 2 && old.Entities[1].CargoResource == Resource.Stone,
             "archived v3 DTO is not mutated during migration");
@@ -246,7 +246,7 @@ public static class CityLogisticsChecks
         state.Factory.Produced[(int)Resource.Tools] = 2;
         FactoryState active = state.Factory;
         _ = new Simulation(state);
-        True(state.Version == 4 && ReferenceEquals(state.Factory, active) && state.Factory.Produced[(int)Resource.Tools] == 2,
+        True(state.Version == 6 && state.Factory.Version == 3 && ReferenceEquals(state.Factory, active) && state.Factory.Produced[(int)Resource.Tools] == 2,
             "valid v4 shared factory state is not reset on load normalization");
     }
 
@@ -254,7 +254,7 @@ public static class CityLogisticsChecks
     {
         GameState state = SharedCityScenario.Create();
         FactorySimulation.ValidateState(state.Factory);
-        True(state.Version == 4 && state.Factory.Width == 42 && state.Factory.Entities.Count > 0 &&
+        True(state.Version == 6 && state.Factory.Version == 3 && state.Factory.Width == 42 && state.Factory.Entities.Count > 0 &&
              state.Cells.Any(cell => cell.Building == BuildingKind.House) &&
              state.Cells.Any(cell => cell.Building == BuildingKind.Warehouse),
             "shared smoke fixture builds houses, city industry, and physical factory equipment together");
@@ -271,6 +271,27 @@ public static class CityLogisticsChecks
     static void Place(FactorySimulation simulation, FactoryKind kind, int x, int z, int direction)
     {
         if (!simulation.TryPlace(kind, x, z, direction, out string reason)) throw new Exception($"placement failed for {kind} at {x},{z}: {reason}");
+    }
+
+    static void MakeLegacy(GameState state,FactoryState factory,int version)
+    {
+        state.Version=version;
+        state.Stock.RemoveRange(ResourceCatalog.LegacyCount,state.Stock.Count-ResourceCatalog.LegacyCount);
+        foreach(Cell cell in state.Cells)
+        {
+            cell.LogisticsInput.RemoveRange(ResourceCatalog.LegacyCount,cell.LogisticsInput.Count-ResourceCatalog.LegacyCount);
+            cell.LogisticsOutput.RemoveRange(ResourceCatalog.LegacyCount,cell.LogisticsOutput.Count-ResourceCatalog.LegacyCount);
+        }
+        factory.Version=1;
+        factory.Produced.RemoveRange(ResourceCatalog.LegacyCount,factory.Produced.Count-ResourceCatalog.LegacyCount);
+        factory.Exported.RemoveRange(ResourceCatalog.LegacyCount,factory.Exported.Count-ResourceCatalog.LegacyCount);
+        factory.Recovered.RemoveRange(ResourceCatalog.LegacyCount,factory.Recovered.Count-ResourceCatalog.LegacyCount);
+        foreach(FactoryEntity entity in factory.Entities)
+        {
+            entity.Input.RemoveRange(ResourceCatalog.LegacyCount,entity.Input.Count-ResourceCatalog.LegacyCount);
+            entity.Output.RemoveRange(ResourceCatalog.LegacyCount,entity.Output.Count-ResourceCatalog.LegacyCount);
+            entity.Paused=false;entity.ClockPercent=100;entity.FluidProgress=0;entity.FluidCursor=0;
+        }
     }
 
     static void True(bool value, string name)

@@ -61,10 +61,11 @@ namespace Riverworks
             if (game.ModalOpen) { game.ModalOpen = false; return true; }
             if (game.ResearchOpen) { game.ToggleResearch(); return true; }
             if (game.HelpOpen) { game.ToggleHelp(); return true; }
+            if(game.ProjectToolActive){game.CancelProjectSite();return true;}
             var factory = game.Factory;
             if (factory != null && factory.IsOpen)
             {
-                if (factory.SelectedTool != FactoryKind.None || factory.RemovalMode) factory.SelectTool(FactoryKind.None);
+                if (factory.SelectedTool != FactoryKind.None || factory.RemovalMode || factory.FoundationMode) factory.SelectTool(FactoryKind.None);
                 else factory.Close();
                 return true;
             }
@@ -127,9 +128,10 @@ namespace Riverworks
 
         bool HasPlacementTool()
         {
+            if(game.ProjectToolActive)return true;
             var factory = game.Factory;
             if (factory != null && factory.IsOpen)
-                return factory.SelectedTool != FactoryKind.None || factory.RemovalMode;
+                return factory.SelectedTool != FactoryKind.None || factory.RemovalMode || factory.FoundationMode;
             return game.SelectedTool != BuildingKind.None || game.DemolitionMode;
         }
 

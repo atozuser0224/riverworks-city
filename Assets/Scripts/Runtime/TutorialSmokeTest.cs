@@ -1061,6 +1061,7 @@ namespace Riverworks
                     Require(dialogue.ActualPageFits, label + " advice page fits its actual rendered body");
 
                     yield return OpenMorePopup(label + " selected More menu");
+                    yield return WaitForMoreActionsSettled(label);
                     VerifyMorePopupBounds(label);
                     yield return CaptureVirtual(label.Replace(" virtual", "") + "-tutorial-more.png");
                     yield return ClickAndSettle("Button_GuidanceLessons", .04f);
@@ -1235,6 +1236,45 @@ namespace Riverworks
                 label + " title text is exactly 22 pixels");
         }
 
+        IEnumerator WaitForMoreActionsSettled(string label)
+        {
+            RectTransform popup = Root("TutorialMorePopup") as RectTransform;
+            Require(popup != null && popup.gameObject.activeInHierarchy,
+                label + " More popup exists before feedback synchronization");
+            float deadline = Time.realtimeSinceStartup + .5f;
+            string lastReason = "no visible actions";
+            while (Time.realtimeSinceStartup <= deadline)
+            {
+                Canvas.ForceUpdateCanvases();
+                Button[] actions = popup.GetComponentsInChildren<Button>(false);
+                bool settled = actions.Length > 0;
+                foreach (Button action in actions)
+                {
+                    bool scaled = Vector3.SqrMagnitude(action.transform.localScale - Vector3.one) > .000001f;
+                    bool playing = action.GetComponentsInChildren<MMF_Player>(true)
+                        .Any(player => player != null && player.IsPlaying);
+                    if (!scaled && !playing) continue;
+                    settled = false;
+                    lastReason = action.name + " scale " + VectorText(action.transform.localScale) +
+                                 (playing ? " feedback playing" : "");
+                    break;
+                }
+                if (settled)
+                {
+                    yield return null;
+                    Canvas.ForceUpdateCanvases();
+                    Require(popup.GetComponentsInChildren<Button>(false).All(action =>
+                            Vector3.SqrMagnitude(action.transform.localScale - Vector3.one) <= .000001f &&
+                            !action.GetComponentsInChildren<MMF_Player>(true)
+                                .Any(player => player != null && player.IsPlaying)),
+                        label + " More actions remain settled for a complete render update");
+                    yield break;
+                }
+                yield return null;
+            }
+            throw new InvalidOperationException(label + " More actions did not settle within 0.5 seconds: " + lastReason);
+        }
+
         void VerifyMorePopupBounds(string label)
         {
             RectTransform popup = Root("TutorialMorePopup") as RectTransform;
@@ -1247,8 +1287,13 @@ namespace Riverworks
             foreach (Button button in visibleButtons)
             {
                 RectTransform rect = button.transform as RectTransform;
-                Check(rect != null && RectContains(popupRect, ProjectedRect(rect), 1f) && RectWithinFrame(rect, 1f),
-                    label + " More action " + button.name + " stays inside popup and frame bounds");
+                Rect actionRect = rect == null ? default : ProjectedRect(rect);
+                bool inside = rect != null && RectContains(popupRect, actionRect, 1f) && RectWithinFrame(rect, 1f);
+                Check(inside, label + " More action " + button.name + " stays inside popup and frame bounds" +
+                    (inside ? "" : " popup=" + RectText(popupRect) + " action=" + RectText(actionRect) +
+                     " scale=" + VectorText(button.transform.localScale) + " feedbackPlaying=" +
+                     button.GetComponentsInChildren<MMF_Player>(true)
+                         .Any(player => player != null && player.IsPlaying)));
             }
         }
 
@@ -1300,6 +1345,13 @@ namespace Riverworks
         static bool RectContains(Rect outer, Rect inner, float tolerance) =>
             inner.xMin >= outer.xMin - tolerance && inner.yMin >= outer.yMin - tolerance &&
             inner.xMax <= outer.xMax + tolerance && inner.yMax <= outer.yMax + tolerance;
+
+        static string RectText(Rect value) => "[" + value.xMin.ToString("0.###") + "," +
+            value.yMin.ToString("0.###") + ".." + value.xMax.ToString("0.###") + "," +
+            value.yMax.ToString("0.###") + "]";
+
+        static string VectorText(Vector3 value) => "[" + value.x.ToString("0.###") + "," +
+            value.y.ToString("0.###") + "," + value.z.ToString("0.###") + "]";
 
         bool VisiblePanelsSettled(out string reason)
         {

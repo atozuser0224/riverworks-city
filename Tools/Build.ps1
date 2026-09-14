@@ -1,5 +1,6 @@
 ﻿[CmdletBinding()]
 param(
+    [string]$OutputDirectory,
     [ValidateRange(1, 16)]
     [int]$WorkerCount = 2
 )
@@ -12,7 +13,12 @@ $versionFile = Join-Path $projectRoot 'ProjectSettings\ProjectVersion.txt'
 $artifactDirectory = Join-Path $projectRoot 'Artifacts'
 $buildLog = Join-Path $artifactDirectory 'build.log'
 $buildResult = Join-Path $artifactDirectory 'build-result.txt'
-$gameExecutable = Join-Path $projectRoot 'Builds\Windows\Riverworks.exe'
+if (-not $OutputDirectory) { $OutputDirectory = Join-Path $projectRoot 'Builds\Windows' }
+if (-not [System.IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Join-Path $projectRoot $OutputDirectory }
+$windowsOutput = [System.IO.Path]::GetFullPath($OutputDirectory)
+$buildsPrefix = (Join-Path $projectRoot 'Builds').TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+if (-not $windowsOutput.StartsWith($buildsPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw '빌드 출력은 이 프로젝트의 Builds 폴더 안에 있어야 합니다.' }
+$gameExecutable = Join-Path $windowsOutput 'Riverworks.exe'
 
 function Resolve-FullPath {
     param(
@@ -100,6 +106,7 @@ $arguments = @(
     '-diag-debug-shader-compiler',
     '-buildTarget', 'Win64',
     '-projectPath', (Quote-NativeArgument $projectRoot),
+    '-riverworks-build-output', (Quote-NativeArgument $windowsOutput),
     '-executeMethod', 'Riverworks.Editor.BuildAutomation.Build',
     '-logFile', (Quote-NativeArgument $buildLog)
 ) -join ' '
@@ -143,7 +150,7 @@ if (-not (Test-Path -LiteralPath $gameExecutable -PathType Leaf)) {
 }
 # Unity reuses the engine launcher timestamp. Freshness is proved by this run's
 # BuildPipeline report/log and the runtime build GUID, not the launcher stub date.
-$managedAssembly = Join-Path $projectRoot 'Builds\Windows\Riverworks_Data\Managed\Assembly-CSharp.dll'
+$managedAssembly = Join-Path $windowsOutput 'Riverworks_Data\Managed\Assembly-CSharp.dll'
 if (-not (Test-Path -LiteralPath $managedAssembly -PathType Leaf)) { throw "게임 코드 어셈블리가 없습니다: $managedAssembly" }
 
 Write-Host "빌드 성공: $gameExecutable"

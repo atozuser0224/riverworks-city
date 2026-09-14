@@ -477,6 +477,8 @@ namespace Riverworks
         public void SetZoom(int level)
         {
             if (GraphContent == null) return;
+            Canvas.ForceUpdateCanvases();
+            ApplyLayout(false);
             Vector2 center = GraphCenter;
             if (nodes.ContainsKey(SelectedTechnology))
             {
@@ -490,6 +492,8 @@ namespace Riverworks
             GraphContent.localScale = new Vector3(ZoomLevel, ZoomLevel, 1);
             CenterOnGraphPoint(center);
             UpdateZoomControls();
+            // Commit the scaled ScrollRect bounds and mask before callers use the new view.
+            Canvas.ForceUpdateCanvases();
         }
 
         void UpdateZoomControls()
@@ -569,7 +573,7 @@ namespace Riverworks
                 if (!connections.ContainsKey(edge) || connections[edge].raycastTarget || connections[edge].Points.Count < 2)
                 { reason = "선행 연결선이 올바르지 않습니다."; return false; }
             }
-            reason = "18개 기술과 선행 연결 지도 정상";
+            reason = nodes.Count + "개 기술과 선행 연결 지도 정상";
             return true;
         }
     }

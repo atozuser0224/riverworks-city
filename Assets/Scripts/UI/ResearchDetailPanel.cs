@@ -197,7 +197,8 @@ namespace Riverworks
         {
             BuildingKind[] buildings = spec.UnlockBuildings ?? Array.Empty<BuildingKind>();
             FactorySpec[] factories = FactoryCatalog.All.Where(item => item != null && item.RequiredTech == spec.Id).ToArray();
-            if (buildings.Length == 0 && factories.Length == 0) return;
+            RecipeSpec[] recipes = FactoryCatalog.Recipes.Where(item => item != null && item.RequiredTech == spec.Id).ToArray();
+            if (buildings.Length == 0 && factories.Length == 0 && recipes.Length == 0) return;
 
             AddSection("해금", ref y);
             foreach (BuildingKind kind in buildings)
@@ -208,6 +209,8 @@ namespace Riverworks
             }
             foreach (FactorySpec factory in factories)
                 AddBody("공장 설비 · " + factory.Name, ref y, 26f, HudStyle.Text);
+            foreach (RecipeSpec recipe in recipes)
+                AddBody("제조법 · " + recipe.Name, ref y, 26f, HudStyle.Text);
         }
 
         void AddPrerequisites(TechSpec spec, GameState state, ref float y)
@@ -362,6 +365,14 @@ namespace Riverworks
                 case TechId.Electrification: return "공장 전력 수요 ×0.85 (15% 감소)";
                 case TechId.MassProduction: return "공장 기계 제작 속도 ×1.25";
                 case TechId.Automation: return "공장 삽입기 속도 ×1.50";
+                case TechId.FluidHandling: return "파이프·분기 파이프·유체 탱크·물 추출과 유체 운송 해금";
+                case TechId.OilRefining: return "원유 추출·정유 시설과 원유 정제 제조법 해금";
+                case TechId.Petrochemistry: return "화학 공장과 플라스틱·고무·황·연료 공정 해금";
+                case TechId.Electronics: return "회로·모터·고급 회로 생산 공정 해금";
+                case TechId.AluminumProcessing: return "보크사이트에서 알루미늄과 케이싱까지의 생산 공정 해금";
+                case TechId.EnergyStorage: return "배터리 생산 공정 해금";
+                case TechId.AdvancedManufacturing: return "제조기·컴퓨터·재활용 공정과 150%·200% 오버클럭 해금";
+                case TechId.IndustrialControl: return "제어 장치 생산 공정 해금";
                 default: return "효과 없음";
             }
         }

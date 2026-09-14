@@ -46,7 +46,7 @@ public static class TechnologyGraphChecks
         TechSpec[] specs = TechCatalog.All.ToArray();
         TechId[] enumIds = Enum.GetValues<TechId>().Where(id => id != TechId.None).ToArray();
 
-        True(specs.Length == 18 && enumIds.Length == 18, "기술 enum과 카탈로그가 각각 18개");
+        True(specs.Length == 26 && enumIds.Length == 26, "기술 enum과 카탈로그가 각각 26개");
         True(specs.All(spec => spec != null && spec.Id != TechId.None), "카탈로그에 None 또는 null 기술 없음");
         True(specs.Select(spec => spec.Id).Distinct().Count() == specs.Length, "기술 ID 중복 없음");
         True(enumIds.All(id => specs.Any(spec => spec.Id == id)), "모든 기술 enum이 카탈로그에 등록");
@@ -58,7 +58,7 @@ public static class TechnologyGraphChecks
         True(specs.All(spec => !spec.Prerequisites.Contains(spec.Id)), "자기 자신을 선행 기술로 요구하지 않음");
 
         TechId[] order = TopologicalOrder(specs);
-        True(order.Length == 18 && order.Distinct().Count() == 18, "기술 그래프가 순환 없는 DAG이며 전체 도달 가능");
+        True(order.Length == 26 && order.Distinct().Count() == 26, "기술 그래프가 순환 없는 DAG이며 전체 도달 가능");
 
         var rank = order.Select((id, index) => (id, index)).ToDictionary(item => item.id, item => item.index);
         True(specs.All(spec => spec.Prerequisites.All(required => rank[required] < rank[spec.Id])), "모든 선행 기술이 위상 순서에서 먼저 도달");
@@ -115,7 +115,7 @@ public static class TechnologyGraphChecks
             simulation.Tick();
         }
 
-        True(state.Technologies.Distinct().Count() == 18 && order.All(state.Technologies.Contains), "새 게임에서 18개 기술 모두 실제 연구 완료");
+        True(state.Technologies.Distinct().Count() == 26 && order.All(state.Technologies.Contains), "새 게임에서 26개 기술 모두 실제 연구 완료");
     }
 
     static void ExistingV3TechnologyStateRemainsValid()
@@ -127,8 +127,8 @@ public static class TechnologyGraphChecks
 
         _ = new Simulation(state);
 
-        True(state.Version == 4 && state.Factory.Width == 42 && state.Factory.Height == 42 && state.ArchivedFactory != null,
-            "기존 v3 저장이 기술 상태를 유지하며 공유 도시 v4로 이동");
+        True(state.Version == 6 && state.Factory != null && state.Factory.Version == 3 && state.Factory.Width == 42 && state.Factory.Height == 42 && state.ArchivedFactory != null && state.ArchivedFactory.Version == 3,
+            "기존 v3 저장이 기술 상태를 유지하며 공유 도시 v6로 이동");
         True(state.Technologies.SequenceEqual(CoreTechnologies), "기존 v3의 9개 연구 상태 그대로 유지");
         True(state.Era == Era.Industrial, "기존 v3 산업 시대 유지");
         True(OptionalTechnologies.All(id => !state.Technologies.Contains(id)), "기존 v3에 새 선택 기술을 자동 부여하지 않음");

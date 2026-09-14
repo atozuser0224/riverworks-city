@@ -39,11 +39,18 @@ public static class ResearchGraphChecks
             Edge(TechId.SteamPower, TechId.Electrification),
             Edge(TechId.Toolmaking, TechId.MassProduction),
             Edge(TechId.Electrification, TechId.Automation),
-            Edge(TechId.MassProduction, TechId.Automation)
+            Edge(TechId.MassProduction, TechId.Automation),
+            Edge(TechId.SteamPower, TechId.FluidHandling), Edge(TechId.Logistics, TechId.FluidHandling),
+            Edge(TechId.FluidHandling, TechId.OilRefining), Edge(TechId.MetallurgicalEfficiency, TechId.OilRefining),
+            Edge(TechId.OilRefining, TechId.Petrochemistry), Edge(TechId.Petrochemistry, TechId.Electronics), Edge(TechId.Toolmaking, TechId.Electronics),
+            Edge(TechId.FluidHandling, TechId.AluminumProcessing), Edge(TechId.MetallurgicalEfficiency, TechId.AluminumProcessing),
+            Edge(TechId.AluminumProcessing, TechId.EnergyStorage), Edge(TechId.Petrochemistry, TechId.EnergyStorage),
+            Edge(TechId.Electronics, TechId.AdvancedManufacturing), Edge(TechId.MassProduction, TechId.AdvancedManufacturing),
+            Edge(TechId.AdvancedManufacturing, TechId.IndustrialControl), Edge(TechId.EnergyStorage, TechId.IndustrialControl), Edge(TechId.Automation, TechId.IndustrialControl)
         };
 
-        True(graph.OrderedTechnologies.Select(spec => spec.Id).SequenceEqual(sourceOrder), "18개 기술의 안정적 위상 순서가 카탈로그 순서를 보존");
-        True(graph.Edges.Count == 19 && expectedEdges.All(graph.Edges.Contains), "18개 실제 카탈로그의 선행 간선 19개를 빠짐없이 제공");
+        True(graph.OrderedTechnologies.Select(spec => spec.Id).SequenceEqual(sourceOrder), "26개 기술의 안정적 위상 순서가 카탈로그 순서를 보존");
+        True(graph.Edges.Count == 35 && expectedEdges.All(graph.Edges.Contains), "26개 실제 카탈로그의 선행 간선 35개를 빠짐없이 제공");
         True(graph.Depth(TechId.CropRotation) == 0 && graph.Depth(TechId.Automation) == 7, "루트와 자동화의 최장 선행 깊이를 계산");
     }
 

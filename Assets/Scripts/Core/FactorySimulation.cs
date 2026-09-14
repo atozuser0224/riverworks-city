@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
@@ -8,7 +7,6 @@ namespace Riverworks
 {
     public class FactorySimulation
     {
-        const int MachineCapacity = 24, StorageCapacity = 80;
         static readonly int[] Dx = { 1, 0, -1, 0 }, Dz = { 0, 1, 0, -1 };
         readonly List<FactoryEntity> processingOrder = new List<FactoryEntity>();
         readonly List<FactoryEntity> reverseTransportOrder = new List<FactoryEntity>();
@@ -16,8 +14,11 @@ namespace Riverworks
         readonly HashSet<int> livePowerNodes = new HashSet<int>();
         readonly HashSet<int> cargoAtTickStart = new HashSet<int>();
         readonly IFactoryEnvironment environment;
+        readonly FactoryFluidSimulation fluidSimulation;
+        GameState technologyState;
         long cachedStructureHash = long.MinValue, cachedPowerHash = long.MinValue;
         bool hasStructureCache, hasPowerCache;
+
         public FactoryState State { get; }
         public float PowerUsed { get; private set; }
         public float PowerAvailable { get; private set; }
@@ -31,99 +32,195 @@ namespace Riverworks
         {
             State = state ?? throw new ArgumentNullException(nameof(state));
             this.environment = environment;
-            ValidateState(state); Normalize(); Recalculate();
+            if (state.Version == 1) FactoryStateValidation.UpgradeLegacy(state);
+            if (state.Version == 2) FactoryStateValidation.UpgradeVersion2(state);
+            else FactoryStateValidation.Validate(state);
+            fluidSimulation = new FactoryFluidSimulation(State);
+            Recalculate();
         }
 
         public void ConfigureTechnology(GameState gameState)
         {
+            technologyState = gameState;
             BeltSpeedMultiplier = TechCatalog.Has(gameState, TechId.Logistics) ? 1.5f : 1f;
             InserterSpeedMultiplier = TechCatalog.Has(gameState, TechId.Automation) ? 1.5f : 1f;
             MachineSpeedMultiplier = TechCatalog.Has(gameState, TechId.MassProduction) ? 1.25f : 1f;
             PowerDemandMultiplier = TechCatalog.Has(gameState, TechId.Electrification) ? .85f : 1f;
+            hasPowerCache = false;
             Recalculate();
         }
 
-        public FactoryEntity GetAt(int x, int z)
+        public FactoryEntity GetAt(int x, int z) => GetAt(x, z, 0);
+
+        public FactoryEntity GetAt(int x, int z, int floor)
         {
             foreach (FactoryEntity e in State.Entities)
             {
-                FactorySpec spec = FactoryCatalog.Get(e.Kind); if (spec != null && x >= e.X && x < e.X + spec.Width && z >= e.Z && z < e.Z + spec.Height) return e;
+                FactorySpec spec = FactoryCatalog.Get(e.Kind);
+                if (spec != null && e.Floor == floor && x >= e.X && x < e.X + spec.Width && z >= e.Z && z < e.Z + spec.Height) return e;
             }
             return null;
         }
 
-        public bool CanPlace(FactoryKind kind, int x, int z, int direction, out string reason)
+        public bool CanPlace(FactoryKind kind, int x, int z, int direction, out string reason) => CanPlace(kind, x, z, direction, 0, out reason);
+
+        public bool CanPlace(FactoryKind kind, int x, int z, int direction, int floor, out string reason)
+            => CanPlaceInternal(kind, x, z, direction, floor, IsVerticalLink(kind), out reason);
+
+        bool CanPlaceInternal(FactoryKind kind, int x, int z, int direction, int floor, bool linkEndpoint, out string reason)
         {
             FactorySpec spec = FactoryCatalog.Get(kind);
             if (spec == null || kind == FactoryKind.None) { reason = "알 수 없는 공장 설비입니다."; return false; }
+            if (IsVerticalLink(kind) && !linkEndpoint) { reason = "수직 연결 설비는 두 층을 함께 선택해 배치해야 합니다."; return false; }
+            if (!IsVerticalLink(kind) && linkEndpoint) { reason = "수직 연결 설비만 쌍으로 배치할 수 있습니다."; return false; }
+            if (floor < 0 || floor > FactoryLayers.MaxFloor) { reason = "지원하지 않는 공장 층입니다."; return false; }
             if (direction < 0 || direction > 3) { reason = "방향 값이 올바르지 않습니다."; return false; }
             if (x < 0 || z < 0 || x + spec.Width > State.Width || z + spec.Height > State.Height) { reason = "공장 부지 경계를 벗어납니다."; return false; }
             for (int zz = z; zz < z + spec.Height; zz++) for (int xx = x; xx < x + spec.Width; xx++)
-                if (GetAt(xx, zz) != null) { reason = "이미 다른 설비가 차지한 자리입니다."; return false; }
-            if (environment != null && !environment.CanPlace(kind, x, z, direction, out reason)) return false;
-            if (kind == FactoryKind.Drill)
+                if (GetAt(xx, zz, floor) != null) { reason = "이미 같은 층의 다른 설비가 차지한 자리입니다."; return false; }
+            if (!FactoryLayers.Supports(State, kind, x, z, floor)) { reason = "이 층의 설비 바닥 전체를 지지하는 플랫폼이 필요합니다."; return false; }
+            if (environment is IFactoryLayerEnvironment layers)
             {
-                bool ore = false; for (int zz = z; zz < z + spec.Height; zz++) for (int xx = x; xx < x + spec.Width; xx++) ore |= environment != null ? environment.HasOre(xx, zz) : HasOre(xx, zz);
-                if (!ore) { reason = "철광맥 위에만 채굴기를 놓을 수 있습니다."; return false; }
+                if (!layers.CanPlaceOnFloor(kind, x, z, direction, floor, out reason)) return false;
             }
+            else if (floor == 0 && environment != null && !environment.CanPlace(kind, x, z, direction, out reason)) return false;
+            if (floor == 0 && !PlacementSourceAvailable(kind, x, z, spec, out reason)) return false;
             reason = ""; return true;
         }
 
         public bool TryPlace(FactoryKind kind, int x, int z, int direction, out string reason)
+            => TryPlace(kind, x, z, direction, 0, out reason);
+
+        public bool TryPlace(FactoryKind kind, int x, int z, int direction, int floor, out string reason)
         {
-            if (!CanPlace(kind, x, z, direction, out reason)) return false;
-            var e = new FactoryEntity { Id = State.NextEntityId++, Kind = kind, X = x, Z = z, Direction = direction };
+            if (!CanPlaceInternal(kind, x, z, direction, floor, false, out reason)) return false;
+            var e = new FactoryEntity { Id = State.NextEntityId++, Kind = kind, X = x, Z = z, Direction = direction, Floor = floor, ClockPercent = 100 };
             if (kind == FactoryKind.Furnace) e.Recipe = FactoryRecipe.IronPlate;
-            State.Entities.Add(e); Recalculate(); return true;
+            else if (kind == FactoryKind.WaterPump) e.Recipe = FactoryRecipe.WaterExtraction;
+            else if (kind == FactoryKind.OilPump) e.Recipe = FactoryRecipe.OilExtraction;
+            State.Entities.Add(e); Recalculate(); reason = ""; return true;
         }
 
-        public bool Remove(int x, int z, out string reason)
+        public bool TryPlaceLink(FactoryKind kind, int x, int z, int direction, int fromFloor, int toFloor, out string reason)
         {
-            FactoryEntity e = GetAt(x, z); if (e == null) { reason = "철거할 설비가 없습니다."; return false; }
-            EnsureInventory(State.Recovered);
-            for (int i = 1; i < 9; i++) { State.Recovered[i] += e.Input[i] + e.Output[i]; e.Input[i] = e.Output[i] = 0; }
-            if (IsCargo(e.CargoResource)) { State.Recovered[(int)e.CargoResource]++; e.CargoResource = Resource.Coins; e.CargoProgress = 0; }
-            State.Entities.Remove(e); Recalculate(); reason = ""; return true;
+            if (!IsVerticalLink(kind)) { reason = "아이템 리프트 또는 유체 라이저만 수직 연결할 수 있습니다."; return false; }
+            if (Math.Abs(fromFloor - toFloor) != 1) { reason = "서로 인접한 두 층만 연결할 수 있습니다."; return false; }
+            if (State.NextEntityId <= 0 || State.NextEntityId >= int.MaxValue) { reason = "새 수직 연결 설비 ID를 안전하게 만들 수 없습니다."; return false; }
+            if (!CanPlaceInternal(kind, x, z, direction, fromFloor, true, out reason) || !CanPlaceInternal(kind, x, z, direction, toFloor, true, out reason)) return false;
+            int senderId = State.NextEntityId, receiverId = senderId + 1;
+            var sender = new FactoryEntity { Id = senderId, LinkId = receiverId, IsLinkSender = true, Kind = kind, X = x, Z = z, Direction = direction, Floor = fromFloor, ClockPercent = 100 };
+            var receiver = new FactoryEntity { Id = receiverId, LinkId = senderId, IsLinkSender = false, Kind = kind, X = x, Z = z, Direction = direction, Floor = toFloor, ClockPercent = 100 };
+            State.Entities.Add(sender); State.Entities.Add(receiver); State.NextEntityId += 2;
+            Recalculate(); reason = "수직 연결 설비 배치 완료"; return true;
+        }
+
+        public bool Remove(int x, int z, out string reason) => Remove(x, z, 0, out reason);
+
+        public bool Remove(int x, int z, int floor, out string reason)
+        {
+            FactoryEntity e = GetAt(x, z, floor);
+            if (e == null) { reason = "철거할 설비가 없습니다."; return false; }
+            var removing = new List<FactoryEntity> { e };
+            if (IsVerticalLink(e.Kind))
+            {
+                FactoryEntity other = Find(e.LinkId);
+                if (other == null || other.Kind != e.Kind || other.LinkId != e.Id) { reason = "수직 연결 쌍이 손상되어 안전하게 철거할 수 없습니다."; return false; }
+                removing.Add(other);
+            }
+            foreach (FactoryEntity target in removing)
+            {
+                RecoverEntity(target);
+                FactoryAutomation.RemoveReferences(State, target.Id);
+            }
+            foreach (FactoryEntity target in removing) State.Entities.Remove(target);
+            Recalculate(); reason = ""; return true;
         }
 
         public bool Rotate(int id, out string reason)
         {
-            FactoryEntity e = Find(id); if (e == null) { reason = "설비를 찾을 수 없습니다."; return false; }
-            if (IsCargo(e.CargoResource)) { reason = "물자를 운반 중에는 회전할 수 없습니다."; return false; }
+            FactoryEntity e = Find(id);
+            if (e == null) { reason = "설비를 찾을 수 없습니다."; return false; }
+            if (ResourceCatalog.IsTransportable(e.CargoResource)) { reason = "물자를 운반 중인 설비는 회전할 수 없습니다."; return false; }
             e.Direction = (e.Direction + 1) & 3; reason = ""; return true;
+        }
+
+        public bool CanUseRecipe(FactoryRecipe recipe, out string reason)
+        {
+            RecipeSpec spec = FactoryCatalog.GetRecipe(recipe);
+            if (spec == null || recipe == FactoryRecipe.None) { reason = "유효한 제조법이 아닙니다."; return false; }
+            if (technologyState != null && spec.RequiredTech != TechId.None && !TechCatalog.Has(technologyState, spec.RequiredTech))
+            { reason = $"{TechCatalog.Get(spec.RequiredTech)?.Name ?? "필요 기술"} 연구가 필요합니다."; return false; }
+            reason = ""; return true;
         }
 
         public bool SetRecipe(int id, FactoryRecipe recipe, out string reason)
         {
-            FactoryEntity e = Find(id); if (e == null) { reason = "설비를 찾을 수 없습니다."; return false; }
-            bool valid = e.Kind == FactoryKind.Furnace ? recipe == FactoryRecipe.IronPlate : e.Kind == FactoryKind.Assembler && (recipe == FactoryRecipe.Tools || recipe == FactoryRecipe.Flour || recipe == FactoryRecipe.Bread);
-            if (!valid) { reason = "이 설비에서 사용할 수 없는 제조법입니다."; return false; }
-            if (e.Progress > 0 || Total(e.Input) > 0) { reason = "원료가 있거나 가공 중에는 제조법을 바꿀 수 없습니다."; return false; }
-            e.Recipe = recipe; reason = ""; return true;
+            FactoryEntity e = Find(id);
+            if (!ValidateRecipeChoice(e, recipe, out reason)) return false;
+            if (e.Recipe == recipe) { reason = ""; return true; }
+            if (e.Progress > 0 || Total(e.Input) > 0 || Total(e.Output) > 0)
+            { reason = "진행도와 입출력 버퍼가 비어 있어야 제조법을 바꿀 수 있습니다."; return false; }
+            e.Recipe = recipe; e.Progress = 0; reason = ""; return true;
+        }
+
+        public bool ReconfigureRecipe(int id, FactoryRecipe recipe, out string reason)
+        {
+            FactoryEntity e = Find(id);
+            if (!ValidateRecipeChoice(e, recipe, out reason)) return false;
+            if (e.Recipe == recipe) { reason = ""; return true; }
+            RecoverBuffers(e); e.Recipe = recipe; reason = ""; return true;
+        }
+
+        public bool SetPaused(int id, bool paused, out string reason)
+        {
+            FactoryEntity e = Find(id);
+            if (e == null) { reason = "설비를 찾을 수 없습니다."; return false; }
+            e.Paused = paused; hasPowerCache = false; Recalculate(); reason = ""; return true;
+        }
+
+        public bool SetClock(int id, int percent, out string reason)
+        {
+            FactoryEntity e = Find(id);
+            if (e == null) { reason = "설비를 찾을 수 없습니다."; return false; }
+            if (!FactoryCatalog.IsClockable(e.Kind)) { reason = "이 설비는 클럭을 조절할 수 없습니다."; return false; }
+            if (percent != 50 && percent != 100 && percent != 150 && percent != 200) { reason = "클럭은 50%, 100%, 150%, 200%만 사용할 수 있습니다."; return false; }
+            if (percent > 100 && (technologyState == null || !TechCatalog.Has(technologyState, TechId.AdvancedManufacturing)))
+            { reason = "고급 제조 연구가 필요합니다."; return false; }
+            e.ClockPercent = percent; hasPowerCache = false; Recalculate(); reason = ""; return true;
         }
 
         public bool SetFilter(int id, Resource resource, out string reason)
         {
-            FactoryEntity e = Find(id); if (e == null || e.Kind != FactoryKind.Inserter) { reason = "투입기를 선택해야 합니다."; return false; }
-            if ((int)resource < 0 || (int)resource > 8) { reason = "알 수 없는 물자입니다."; return false; }
+            FactoryEntity e = Find(id);
+            if (e == null) { reason = "설비를 찾을 수 없습니다."; return false; }
+            bool solid = (e.Kind == FactoryKind.Inserter || e.Kind == FactoryKind.ItemLift) && (resource == Resource.Coins || ResourceCatalog.IsSolid(resource));
+            bool fluid = FactoryCatalog.IsFluidTransport(e.Kind) && (resource == Resource.Coins || ResourceCatalog.IsFluid(resource));
+            if (!solid && !fluid) { reason = "이 설비에서 사용할 수 없는 필터입니다."; return false; }
+            if (fluid && resource != Resource.Coins && HasDifferentFluid(e, resource)) { reason = "다른 유체가 남아 있어 필터를 바꿀 수 없습니다."; return false; }
             e.Filter = resource; reason = ""; return true;
         }
 
         public bool AddInput(int id, Resource resource, int amount, out string reason)
         {
             FactoryEntity e = Find(id);
-            if (e == null || (e.Kind != FactoryKind.ImportDock && e.Kind != FactoryKind.Storage)) { reason = "반입 부두나 창고에만 물자를 넣을 수 있습니다."; return false; }
-            if (!IsCargo(resource) || amount <= 0) { reason = "올바른 물자와 수량이 필요합니다."; return false; }
-            int free = StorageCapacity - Total(e.Input); if (amount > free) { reason = "보관 공간이 부족합니다."; return false; }
+            if (e == null) { reason = "설비를 찾을 수 없습니다."; return false; }
+            bool solid = (e.Kind == FactoryKind.ImportDock || e.Kind == FactoryKind.Storage) && ResourceCatalog.IsTransportable(resource);
+            bool fluid = e.Kind == FactoryKind.FluidTank && ResourceCatalog.IsFluid(resource);
+            if ((!solid && !fluid) || amount <= 0) { reason = "이 설비에 넣을 수 없는 물자 또는 수량입니다."; return false; }
+            if (fluid && e.Filter != Resource.Coins && e.Filter != resource) { reason = "탱크의 유체 필터와 투입 유체가 일치하지 않습니다."; return false; }
+            if (fluid && HasDifferentFluid(e, resource)) { reason = "탱크에는 한 종류의 유체만 저장할 수 있습니다."; return false; }
+            int capacity = FactoryCatalog.Get(e.Kind).InputCapacity;
+            if (Total(e.Input) + amount > capacity) { reason = "보관 공간이 부족합니다."; return false; }
             e.Input[(int)resource] += amount; reason = ""; return true;
         }
 
         public int TakeExports(Resource resource, int maximum = int.MaxValue)
         {
-            if (!IsCargo(resource) || maximum <= 0) return 0;
+            if (!ResourceCatalog.IsTransportable(resource) || maximum <= 0) return 0;
             int taken = 0;
             foreach (FactoryEntity e in State.Entities.Where(x => x.Kind == FactoryKind.ExportDock))
             {
+                if (e.IsStopped) continue;
                 if (environment != null && !environment.CanExport(e)) continue;
                 int n = Math.Min(e.Input[(int)resource], maximum - taken); e.Input[(int)resource] -= n; taken += n;
                 if (taken >= maximum) break;
@@ -133,105 +230,75 @@ namespace Riverworks
 
         public void Tick(float seconds)
         {
-            if (seconds <= 0 || float.IsNaN(seconds) || float.IsInfinity(seconds)) return;
+            if (seconds <= 0 || !Finite(seconds)) return;
+            FactoryAutomation.Evaluate(State, technologyState);
             Recalculate(); State.ElapsedSeconds += seconds;
             cargoAtTickStart.Clear();
-            foreach (FactoryEntity e in processingOrder) if (IsCargo(e.CargoResource)) cargoAtTickStart.Add(e.Id);
+            foreach (FactoryEntity e in processingOrder) if (ResourceCatalog.IsTransportable(e.CargoResource)) cargoAtTickStart.Add(e.Id);
             foreach (FactoryEntity e in processingOrder) ProcessMachine(e, seconds);
-            foreach (FactoryEntity e in processingOrder) if (e.Kind == FactoryKind.Inserter && e.Powered) ProcessInserter(e, seconds * InserterSpeedMultiplier, cargoAtTickStart.Contains(e.Id));
-            foreach (FactoryEntity e in reverseTransportOrder) if (cargoAtTickStart.Contains(e.Id)) ProcessBelt(e, seconds * BeltSpeedMultiplier);
-            foreach (FactoryEntity e in processingOrder) if (e.Kind == FactoryKind.Drill && e.Powered) EmitDrill(e);
+            foreach (FactoryEntity e in processingOrder) if (e.Kind == FactoryKind.Inserter && e.Powered && !e.IsStopped) ProcessInserter(e, seconds * InserterSpeedMultiplier, cargoAtTickStart.Contains(e.Id));
+            foreach (FactoryEntity e in reverseTransportOrder) if (cargoAtTickStart.Contains(e.Id) && !e.IsStopped) ProcessBelt(e, seconds * BeltSpeedMultiplier);
+            foreach (FactoryEntity e in processingOrder) if (e.Kind == FactoryKind.Drill && e.Powered && !e.IsStopped) EmitExtraction(e);
+            ProcessItemLifts(seconds);
+            fluidSimulation.Tick(seconds);
+            foreach (FactoryEntity e in processingOrder)
+            {
+                RecipeSpec recipe = FactoryCatalog.IsProduction(e.Kind) ? FactoryCatalog.GetRecipe(EffectiveRecipe(e)) : null;
+                if (e.IsStopped && e.Paused) e.Status = "수동 일시정지";
+                else if (e.AutomationBlocked && (e.Status == null || !e.Status.StartsWith("자동화 조건 오류", StringComparison.Ordinal))) e.Status = "자동화 조건 대기";
+                else if (recipe != null && HasInputs(e, recipe) && !HasOutputSpace(e, recipe)) e.Status = "출력 또는 부산물 공간 부족";
+            }
             Recalculate();
         }
 
         public void Recalculate()
         {
-            Normalize();
             long structureHash = StructureHash();
             if (!hasStructureCache || structureHash != cachedStructureHash) RebuildEntityCaches(structureHash);
             long powerHash = PowerHash(structureHash);
             if (!hasPowerCache || powerHash != cachedPowerHash) RecalculatePowerGraph(powerHash);
-            int moving = 0; foreach (FactoryEntity e in State.Entities) if (IsCargo(e.CargoResource)) moving++;
-            MovingItems = moving;
+            MovingItems = State.Entities.Count(e => ResourceCatalog.IsTransportable(e.CargoResource));
         }
 
-        public void InvalidateEnvironment()
-        {
-            hasPowerCache = false;
-            Recalculate();
-        }
-
+        public void InvalidateEnvironment() { hasPowerCache = false; Recalculate(); }
         public static bool HasOre(int x, int z) => x >= 1 && x <= 4 && z >= 6 && z <= 10;
-
-        public static void ValidateState(FactoryState state)
-        {
-            if (state == null) throw new ArgumentNullException(nameof(state));
-            if (state.Version != 1 || state.Width <= 0 || state.Height <= 0 || state.Width > 256 || state.Height > 256) throw new InvalidDataException("지원하지 않는 공장 저장 형식입니다.");
-            if (state.Entities == null || state.Produced == null || state.Exported == null || state.Recovered == null) throw new InvalidDataException("공장 저장 데이터가 비어 있습니다.");
-            if (state.PowerBudget < 0 || state.PowerBudget > 1000000 || !Finite(state.ElapsedSeconds) || state.ElapsedSeconds < 0) throw new InvalidDataException("잘못된 공장 전력 또는 시간 데이터입니다.");
-            var ids = new HashSet<int>(); var occupied = new HashSet<int>();
-            foreach (FactoryEntity e in state.Entities)
-            {
-                FactorySpec spec = e == null ? null : FactoryCatalog.Get(e.Kind);
-                if (spec == null || e.Id <= 0 || !ids.Add(e.Id) || e.Direction < 0 || e.Direction > 3 || e.X < 0 || e.Z < 0 || e.X + spec.Width > state.Width || e.Z + spec.Height > state.Height) throw new InvalidDataException("잘못된 공장 설비 데이터입니다.");
-                if (e.Input == null || e.Output == null || e.Input.Count != 9 || e.Output.Count != 9 || e.Input.Any(v => v < 0) || e.Output.Any(v => v < 0) || e.Input[0] != 0 || e.Output[0] != 0) throw new InvalidDataException("잘못된 공장 물자 데이터입니다.");
-                if (!Finite(e.CargoProgress) || e.CargoProgress < 0 || e.CargoProgress > 1 || !Finite(e.Progress) || e.Progress < 0) throw new InvalidDataException("잘못된 공장 진행률입니다.");
-                if ((e.CargoResource == Resource.Coins && e.CargoProgress != 0) || (!IsCargo(e.CargoResource) && e.CargoResource != Resource.Coins) || (IsCargo(e.CargoResource) && e.Kind != FactoryKind.Belt && e.Kind != FactoryKind.Splitter && e.Kind != FactoryKind.Inserter)) throw new InvalidDataException("잘못된 운송 물자입니다.");
-                if ((int)e.Filter < 0 || (int)e.Filter > 8 || (e.Kind != FactoryKind.Inserter && e.Filter != Resource.Coins)) throw new InvalidDataException("잘못된 투입기 필터입니다.");
-                bool recipeOkay = e.Kind == FactoryKind.Furnace ? e.Recipe == FactoryRecipe.IronPlate : e.Kind == FactoryKind.Assembler ? e.Recipe == FactoryRecipe.None || e.Recipe == FactoryRecipe.Tools || e.Recipe == FactoryRecipe.Flour || e.Recipe == FactoryRecipe.Bread : e.Recipe == FactoryRecipe.None;
-                if (!recipeOkay) throw new InvalidDataException("설비와 제조법이 맞지 않습니다.");
-                float maxProgress = e.Kind == FactoryKind.Drill ? 2 : FactoryCatalog.RecipeDuration(e.Recipe);
-                if (e.Progress > maxProgress) throw new InvalidDataException("설비 진행률이 제조 주기를 벗어납니다.");
-                int inputTotal = Total(e.Input), outputTotal = Total(e.Output);
-                if ((e.Kind == FactoryKind.Storage || e.Kind == FactoryKind.ImportDock || e.Kind == FactoryKind.ExportDock) && inputTotal > StorageCapacity) throw new InvalidDataException("보관 설비 용량을 초과했습니다.");
-                if ((e.Kind == FactoryKind.Drill || e.Kind == FactoryKind.Furnace || e.Kind == FactoryKind.Assembler) && (inputTotal > MachineCapacity || outputTotal > MachineCapacity)) throw new InvalidDataException("생산 설비 용량을 초과했습니다.");
-                if (e.Kind == FactoryKind.Drill && (((state.Width != 42 || state.Height != 42) && !HasOreInFootprint(e)) || inputTotal != 0 || e.Output.Where((v, i) => i != (int)Resource.Ore && v != 0).Any())) throw new InvalidDataException("잘못된 채굴기 데이터입니다.");
-                if (e.Kind == FactoryKind.Furnace && (e.Input.Where((v, i) => i != (int)Resource.Ore && v != 0).Any() || e.Output.Where((v, i) => i != (int)Resource.Steel && v != 0).Any())) throw new InvalidDataException("잘못된 용광로 물자입니다.");
-                if (e.Kind == FactoryKind.Assembler && e.Input.Where((v, i) => i > 0 && v != 0 && !NeededBy(e.Recipe, (Resource)i)).Any()) throw new InvalidDataException("조립기 제조법과 원료가 맞지 않습니다.");
-                bool buffersAllowed = e.Kind == FactoryKind.Drill || e.Kind == FactoryKind.Furnace || e.Kind == FactoryKind.Assembler || e.Kind == FactoryKind.Storage || e.Kind == FactoryKind.ImportDock || e.Kind == FactoryKind.ExportDock;
-                if (!buffersAllowed && (inputTotal != 0 || outputTotal != 0)) throw new InvalidDataException("운송 설비에 잘못된 버퍼가 있습니다.");
-                if ((e.Kind == FactoryKind.Storage || e.Kind == FactoryKind.ImportDock || e.Kind == FactoryKind.ExportDock) && outputTotal != 0) throw new InvalidDataException("보관 설비에 잘못된 출력 버퍼가 있습니다.");
-                for (int z = e.Z; z < e.Z + spec.Height; z++) for (int x = e.X; x < e.X + spec.Width; x++) if (!occupied.Add(z * state.Width + x)) throw new InvalidDataException("공장 설비가 겹칩니다.");
-            }
-            if (state.NextEntityId <= 0 || ids.Any(id => id >= state.NextEntityId)) throw new InvalidDataException("다음 설비 ID가 올바르지 않습니다.");
-            ValidateInventory(state.Produced); ValidateInventory(state.Exported); ValidateInventory(state.Recovered);
-        }
+        public static void ValidateState(FactoryState state) => FactoryStateValidation.Validate(state);
 
         void ProcessMachine(FactoryEntity e, float seconds)
         {
-            if (!e.Powered || (e.Kind != FactoryKind.Drill && e.Kind != FactoryKind.Furnace && e.Kind != FactoryKind.Assembler)) return;
-            if (e.Kind == FactoryKind.Drill)
+            if (!e.Powered || e.IsStopped || !FactoryCatalog.IsProduction(e.Kind)) return;
+            FactoryRecipe effective = EffectiveRecipe(e); RecipeSpec recipe = FactoryCatalog.GetRecipe(effective);
+            if (recipe == null) { e.Status = "제조법을 선택하세요."; return; }
+            if (!CanUseRecipe(effective, out string gate)) { e.Status = gate; return; }
+            if (recipe.IsExtraction && !SourceAvailable(e, recipe.SourceResource)) { e.Status = "필요한 자원 지형이 없습니다."; return; }
+            if (!HasInputs(e, recipe)) { e.Status = "제조법 원료 부족"; return; }
+            if (!HasOutputSpace(e, recipe)) { e.Status = "출력 또는 부산물 공간 부족"; return; }
+            e.Progress += seconds * MachineSpeedMultiplier * e.ClockPercent / 100f;
+            e.Status = recipe.IsExtraction ? "자원 추출 중" : "가공 중";
+            int batches = MaximumPossibleBatches(e, recipe);
+            while (batches-- > 0)
             {
-                if (Total(e.Output) >= MachineCapacity) { e.Status = "출력 공간 부족"; return; }
-                e.Progress += seconds; e.Status = "철광석 채굴 중";
-                while (e.Progress >= 2f && Total(e.Output) < MachineCapacity) { e.Progress -= 2f; e.Output[(int)Resource.Ore]++; State.Produced[(int)Resource.Ore]++; }
-                return;
+                e.Progress -= recipe.Duration;
+                foreach (RecipeAmount input in recipe.Inputs) e.Input[(int)input.Resource] -= input.Amount;
+                foreach (RecipeAmount output in recipe.Outputs) { e.Output[(int)output.Resource] += output.Amount; State.Produced[(int)output.Resource] += output.Amount; }
+                e.Status = "생산 완료";
             }
-            Recipe(e.Recipe, out Resource a, out int ac, out Resource b, out int bc, out Resource output, out int count, out float duration);
-            if (!IsCargo(output)) { e.Status = "제조법을 선택하세요"; e.Progress = 0; return; }
-            bool inputs = e.Input[(int)a] >= ac && (bc == 0 || e.Input[(int)b] >= bc);
-            if (!inputs) { e.Status = "제조법 원료 부족"; e.Progress = 0; return; }
-            if (Total(e.Output) + count > MachineCapacity) { e.Status = "출력 공간 부족"; return; }
-            e.Progress += seconds * MachineSpeedMultiplier; e.Status = "가공 중";
-            if (e.Progress >= duration)
-            {
-                e.Progress -= duration; e.Input[(int)a] -= ac; if (bc > 0) e.Input[(int)b] -= bc;
-                e.Output[(int)output] += count; State.Produced[(int)output] += count; e.Status = "생산 완료";
-            }
+            // Buffer capacity bounds the number of useful completions even for an extreme delta.
+            if (e.Progress >= recipe.Duration) e.Progress = Math.Max(0, recipe.Duration - .000001f);
         }
 
-        void EmitDrill(FactoryEntity e)
+        void EmitExtraction(FactoryEntity e)
         {
-            if (e.Output[(int)Resource.Ore] <= 0) return;
-            CellInFront(e, out int x, out int z); FactoryEntity target = GetAt(x, z);
-            if (target == null && environment != null && environment.TryGive(x, z, Resource.Ore))
+            RecipeSpec recipe = FactoryCatalog.GetRecipe(EffectiveRecipe(e));
+            if (recipe == null || !recipe.IsExtraction) return;
+            foreach (RecipeAmount output in recipe.Outputs)
             {
-                e.Output[(int)Resource.Ore]--;
-                e.Status = "도시로 광석 전달";
-                return;
+                if (!ResourceCatalog.IsTransportable(output.Resource) || e.Output[(int)output.Resource] <= 0) continue;
+                CellInFront(e, out int x, out int z); FactoryEntity target = GetAt(x, z, e.Floor);
+                if (target == null && e.Floor == 0 && environment != null && environment.TryGive(x, z, output.Resource)) { e.Output[(int)output.Resource]--; e.Status = "도시로 자원 전달"; return; }
+                if (target != null && Accept(target, output.Resource, false)) { e.Output[(int)output.Resource]--; e.Status = "추출물 배출"; return; }
+                e.Status = "출구 막힘"; return;
             }
-            if (target != null && Accept(target, Resource.Ore, false)) { e.Output[(int)Resource.Ore]--; e.Status = "철광석 배출"; }
-            else if (e.Output[(int)Resource.Ore] > 0) e.Status = "출구 막힘";
         }
 
         void ProcessInserter(FactoryEntity e, float seconds, bool startedWithCargo)
@@ -239,137 +306,288 @@ namespace Riverworks
             if (startedWithCargo)
             {
                 e.CargoProgress = Math.Min(1, e.CargoProgress + seconds * 1.5f);
-                if (e.CargoProgress >= 1 && environment != null)
+                if (e.CargoProgress >= 1 && e.Floor == 0 && environment != null)
                 {
                     CellInFront(e, out int cityX, out int cityZ);
-                    if (GetAt(cityX, cityZ) == null && environment.TryGive(cityX, cityZ, e.CargoResource))
-                    {
-                        ClearCargo(e);
-                        return;
-                    }
+                    if (GetAt(cityX, cityZ, 0) == null && environment.TryGive(cityX, cityZ, e.CargoResource)) { ClearCargo(e); return; }
                 }
-                if (e.CargoProgress >= 1) { CellInFront(e, out int x, out int z); FactoryEntity target = GetAt(x, z); if (target != null && Accept(target, e.CargoResource, true)) ClearCargo(e); else e.Status = "내려놓을 공간 없음"; }
+                if (e.CargoProgress >= 1)
+                {
+                    CellInFront(e, out int x, out int z); FactoryEntity dropTarget = GetAt(x, z, e.Floor);
+                    if (dropTarget != null && Accept(dropTarget, e.CargoResource, true)) ClearCargo(e); else e.Status = "내려놓을 공간 없음";
+                }
                 return;
             }
-            if (IsCargo(e.CargoResource)) return;
-            int bx = e.X - Dx[e.Direction], bz = e.Z - Dz[e.Direction]; FactoryEntity source = GetAt(bx, bz);
-            if (source == null && environment != null && environment.TryTake(bx, bz, e.Filter, out Resource externalItem))
-            {
-                e.CargoResource = externalItem;
-                e.CargoProgress = 0;
-                e.Status = "도시 물자 운반 중";
-                return;
-            }
-            if (source != null && TakeOne(source, e.Filter, out Resource item)) { e.CargoResource = item; e.CargoProgress = 0; e.Status = "물자 운반 중"; }
+            if (ResourceCatalog.IsTransportable(e.CargoResource)) return;
+            int bx = e.X - Dx[e.Direction], bz = e.Z - Dz[e.Direction]; FactoryEntity source = GetAt(bx, bz, e.Floor);
+            CellInFront(e, out int tx, out int tz); FactoryEntity target = GetAt(tx, tz, e.Floor);
+            if (source == null && e.Floor == 0 && environment != null && TryTakeExternalForTarget(bx, bz, e.Filter, target, out Resource externalItem))
+            { e.CargoResource = externalItem; e.CargoProgress = 0; e.Status = "도시 물자 운반 중"; return; }
+            if (source != null && TakeOne(source, e.Filter, target, out Resource item)) { e.CargoResource = item; e.CargoProgress = 0; e.Status = "물자 운반 중"; }
             else e.Status = "집을 물자 없음";
         }
 
         void ProcessBelt(FactoryEntity e, float seconds)
         {
-            if (!IsCargo(e.CargoResource)) { e.CargoProgress = 0; return; }
+            if (!ResourceCatalog.IsTransportable(e.CargoResource)) { e.CargoProgress = 0; return; }
             e.CargoProgress = Math.Min(1, e.CargoProgress + seconds * 2f); if (e.CargoProgress < 1) return;
-            int firstDir = e.Direction, secondDir = (e.Direction + 1) & 3;
-            if (e.Kind == FactoryKind.Splitter && e.SplitLeft) { firstDir = secondDir; secondDir = e.Direction; }
-            bool moved = TrySend(e, firstDir); if (!moved && e.Kind == FactoryKind.Splitter) moved = TrySend(e, secondDir);
+            int first = e.Direction, second = (e.Direction + 1) & 3;
+            if (e.Kind == FactoryKind.Splitter && e.SplitLeft) { first = second; second = e.Direction; }
+            bool moved = TrySend(e, first); if (!moved && e.Kind == FactoryKind.Splitter) moved = TrySend(e, second);
             if (moved && e.Kind == FactoryKind.Splitter) e.SplitLeft = !e.SplitLeft; else if (!moved) e.Status = "벨트 정체";
+        }
+
+        void ProcessItemLifts(float seconds)
+        {
+            foreach (FactoryEntity receiver in processingOrder)
+            {
+                if (receiver.Kind != FactoryKind.ItemLift || receiver.IsLinkSender || receiver.IsStopped || !receiver.Powered || !cargoAtTickStart.Contains(receiver.Id)) continue;
+                if (!ResourceCatalog.IsTransportable(receiver.CargoResource)) continue;
+                receiver.CargoProgress = Math.Min(1, receiver.CargoProgress + seconds * 2f * BeltSpeedMultiplier);
+                if (receiver.CargoProgress < 1) continue;
+                int x = receiver.X + Dx[receiver.Direction], z = receiver.Z + Dz[receiver.Direction];
+                FactoryEntity target = GetAt(x, z, receiver.Floor); Resource item = receiver.CargoResource;
+                if (target == null && receiver.Floor == 0 && environment != null && environment.TryGive(x, z, item)) { ClearCargo(receiver); receiver.Status = "리프트 화물 배출"; continue; }
+                if (target != null && Accept(target, item, false)) { ClearCargo(receiver); receiver.Status = "리프트 화물 배출"; }
+                else receiver.Status = "리프트 출구 막힘";
+            }
+            foreach (FactoryEntity sender in processingOrder)
+            {
+                if (sender.Kind != FactoryKind.ItemLift || !sender.IsLinkSender || sender.IsStopped || !sender.Powered || !cargoAtTickStart.Contains(sender.Id)) continue;
+                if (!ResourceCatalog.IsTransportable(sender.CargoResource)) continue;
+                FactoryEntity receiver = Find(sender.LinkId);
+                if (receiver == null || receiver.Kind != FactoryKind.ItemLift || receiver.IsLinkSender || receiver.LinkId != sender.Id || receiver.IsStopped || !receiver.Powered ||
+                    ResourceCatalog.IsTransportable(receiver.CargoResource) || !Matches(sender.CargoResource, receiver.Filter))
+                { sender.Status = "수직 리프트 대기"; continue; }
+                sender.CargoProgress = Math.Min(1, sender.CargoProgress + seconds * 2f);
+                if (sender.CargoProgress < 1) { sender.Status = "수직 운반 중"; continue; }
+                Resource item = sender.CargoResource; ClearCargo(sender);
+                receiver.CargoResource = item; receiver.CargoProgress = 0;
+                sender.Status = "수직 운반 완료"; receiver.Status = "리프트 화물 도착";
+            }
         }
 
         bool TrySend(FactoryEntity e, int direction)
         {
-            int targetX = e.X + Dx[direction], targetZ = e.Z + Dz[direction];
-            FactoryEntity target = GetAt(targetX, targetZ); Resource item = e.CargoResource;
+            int tx = e.X + Dx[direction], tz = e.Z + Dz[direction]; FactoryEntity target = GetAt(tx, tz, e.Floor); Resource item = e.CargoResource;
             if (target != null && (target.Kind == FactoryKind.Belt || target.Kind == FactoryKind.Splitter) && target.X + Dx[target.Direction] == e.X && target.Z + Dz[target.Direction] == e.Z) return false;
-            if (target == null && environment != null && environment.TryGive(targetX, targetZ, item)) { ClearCargo(e); return true; }
-            if (target != null && Accept(target, item, false)) { ClearCargo(e); return true; } return false;
+            if (target == null && e.Floor == 0 && environment != null && environment.TryGive(tx, tz, item)) { ClearCargo(e); return true; }
+            if (target != null && Accept(target, item, false)) { ClearCargo(e); return true; }
+            return false;
         }
 
         bool Accept(FactoryEntity target, Resource item, bool fromInserter)
         {
-            if (!IsCargo(item)) return false;
-            if (target.Kind == FactoryKind.Belt || target.Kind == FactoryKind.Splitter || target.Kind == FactoryKind.Inserter)
+            if (!CanAccept(target, item, fromInserter)) return false;
+            if (target.Kind == FactoryKind.Belt || target.Kind == FactoryKind.Splitter || target.Kind == FactoryKind.Inserter || target.Kind == FactoryKind.ItemLift)
             {
-                if (IsCargo(target.CargoResource)) return false; target.CargoResource = item; target.CargoProgress = 0; target.Status = "운송 중"; return true;
+                target.CargoResource = item; target.CargoProgress = 0; target.Status = "이송 중"; return true;
             }
             if (target.Kind == FactoryKind.ExportDock || target.Kind == FactoryKind.Storage || target.Kind == FactoryKind.ImportDock)
             {
-                if (Total(target.Input) >= StorageCapacity) return false; target.Input[(int)item]++; target.Status = target.Kind == FactoryKind.ExportDock ? "반출 대기" : "보관 중"; return true;
+                target.Input[(int)item]++; target.Status = target.Kind == FactoryKind.ExportDock ? "반출 대기" : "보관 중"; return true;
             }
-            if (fromInserter && (target.Kind == FactoryKind.Furnace || target.Kind == FactoryKind.Assembler))
+            if (fromInserter && FactoryCatalog.IsProduction(target.Kind))
             {
-                if (!NeededBy(target.Recipe, item) || Total(target.Input) >= MachineCapacity) return false;
-                int ingredientLimit = RecipeIngredientCount(target.Recipe) > 1 ? MachineCapacity / 2 : MachineCapacity;
-                if (target.Input[(int)item] >= ingredientLimit) return false;
                 target.Input[(int)item]++; return true;
             }
             return false;
         }
 
-        bool TakeOne(FactoryEntity source, Resource filter, out Resource item)
+        bool CanAccept(FactoryEntity target, Resource item, bool fromInserter) => CanAccept(target, item, fromInserter, 0);
+
+        bool CanAccept(FactoryEntity target, Resource item, bool fromInserter, int depth)
+        {
+            if (target == null || target.IsStopped || !ResourceCatalog.IsTransportable(item) || depth > 4) return false;
+            if (target.Kind == FactoryKind.ItemLift)
+                return target.IsLinkSender && !ResourceCatalog.IsTransportable(target.CargoResource) && Matches(item, target.Filter);
+            if (target.Kind == FactoryKind.Inserter)
+            {
+                if (ResourceCatalog.IsTransportable(target.CargoResource) || !Matches(item, target.Filter)) return false;
+                CellInFront(target, out int x, out int z); FactoryEntity downstream = GetAt(x, z, target.Floor);
+                return downstream == null || CanAccept(downstream, item, true, depth + 1);
+            }
+            if (target.Kind == FactoryKind.Belt || target.Kind == FactoryKind.Splitter)
+                return !ResourceCatalog.IsTransportable(target.CargoResource);
+            if (target.Kind == FactoryKind.ExportDock || target.Kind == FactoryKind.Storage || target.Kind == FactoryKind.ImportDock)
+                return Total(target.Input) < FactoryCatalog.Get(target.Kind).InputCapacity;
+            if (!fromInserter || !FactoryCatalog.IsProduction(target.Kind)) return false;
+            RecipeSpec recipe = FactoryCatalog.GetRecipe(EffectiveRecipe(target));
+            RecipeAmount ingredient = recipe == null ? default : recipe.Inputs.FirstOrDefault(a => a.Resource == item);
+            if (recipe == null || ingredient.Amount <= 0) return false;
+            int capacity = FactoryCatalog.Get(target.Kind).InputCapacity;
+            if (Total(target.Input) >= capacity) return false;
+            int perBatch = recipe.Inputs.Sum(a => a.Amount);
+            int quotaBatches = Math.Max(1, capacity / Math.Max(1, perBatch));
+            return target.Input[(int)item] < ingredient.Amount * quotaBatches;
+        }
+
+        bool TryTakeExternalForTarget(int x, int z, Resource filter, FactoryEntity target, out Resource item)
         {
             item = Resource.Coins;
-            if ((source.Kind == FactoryKind.Belt || source.Kind == FactoryKind.Splitter) && IsCargo(source.CargoResource) && Matches(source.CargoResource, filter)) { item = source.CargoResource; ClearCargo(source); return true; }
-            List<int> inventory = source.Kind == FactoryKind.Furnace || source.Kind == FactoryKind.Assembler || source.Kind == FactoryKind.Drill ? source.Output : (source.Kind == FactoryKind.Storage || source.Kind == FactoryKind.ImportDock ? source.Input : null);
+            if (target != null)
+            {
+                if (filter != Resource.Coins)
+                {
+                    if (!CanAccept(target, filter, true) || !environment.TryTake(x, z, filter, out Resource filtered) || filtered != filter) return false;
+                    item = filtered; return true;
+                }
+                foreach (ResourceSpec candidate in ResourceCatalog.SolidResources)
+                {
+                    if (!CanAccept(target, candidate.Id, true) || !environment.TryTake(x, z, candidate.Id, out Resource taken)) continue;
+                    if (taken != candidate.Id) return false;
+                    item = taken; return true;
+                }
+                return false;
+            }
+            if (!environment.TryTake(x, z, filter, out Resource external) || !ResourceCatalog.IsTransportable(external)) return false;
+            item = external; return true;
+        }
+
+        bool TakeOne(FactoryEntity source, Resource filter, FactoryEntity target, out Resource item)
+        {
+            item = Resource.Coins;
+            if (source == null || source.IsStopped) return false;
+            if (source.Kind == FactoryKind.ItemLift && !source.IsLinkSender && ResourceCatalog.IsTransportable(source.CargoResource) && Matches(source.CargoResource, filter) &&
+                (target == null || CanAccept(target, source.CargoResource, true)))
+            { item = source.CargoResource; ClearCargo(source); return true; }
+            if ((source.Kind == FactoryKind.Belt || source.Kind == FactoryKind.Splitter) && ResourceCatalog.IsTransportable(source.CargoResource) &&
+                Matches(source.CargoResource, filter) && (target == null || CanAccept(target, source.CargoResource, true)))
+            { item = source.CargoResource; ClearCargo(source); return true; }
+            List<int> inventory = FactoryCatalog.IsProduction(source.Kind) ? source.Output :
+                (source.Kind == FactoryKind.Storage || source.Kind == FactoryKind.ImportDock ? source.Input : null);
             if (inventory == null) return false;
-            for (int i = 1; i < 9; i++) if (inventory[i] > 0 && Matches((Resource)i, filter)) { inventory[i]--; item = (Resource)i; return true; }
+            foreach (ResourceSpec resource in ResourceCatalog.SolidResources)
+                if (inventory[(int)resource.Id] > 0 && Matches(resource.Id, filter) && (target == null || CanAccept(target, resource.Id, true)))
+                { inventory[(int)resource.Id]--; item = resource.Id; return true; }
             return false;
         }
 
-        static void Recipe(FactoryRecipe recipe, out Resource a, out int ac, out Resource b, out int bc, out Resource output, out int count, out float duration)
+        bool ValidateRecipeChoice(FactoryEntity e, FactoryRecipe recipe, out string reason)
         {
-            a = b = output = Resource.Coins; ac = bc = count = 0; duration = FactoryCatalog.RecipeDuration(recipe);
-            switch (recipe) {
-                case FactoryRecipe.IronPlate: a = Resource.Ore; ac = 2; output = Resource.Steel; count = 1; break;
-                case FactoryRecipe.Tools: a = Resource.Steel; ac = 1; b = Resource.Timber; bc = 1; output = Resource.Tools; count = 1; break;
-                case FactoryRecipe.Flour: a = Resource.Grain; ac = 2; output = Resource.Flour; count = 2; break;
-                case FactoryRecipe.Bread: a = Resource.Flour; ac = 2; output = Resource.Bread; count = 3; break;
+            if (e == null) { reason = "설비를 찾을 수 없습니다."; return false; }
+            if (recipe == FactoryRecipe.None)
+            {
+                if (!FactoryCatalog.IsProduction(e.Kind) || e.Kind == FactoryKind.Drill || e.Kind == FactoryKind.WaterPump || e.Kind == FactoryKind.OilPump)
+                { reason = "이 설비는 제조법 없음 상태를 사용할 수 없습니다."; return false; }
+                reason = ""; return true;
             }
+            if (!FactoryCatalog.IsRecipeCompatible(e.Kind, recipe)) { reason = "이 설비에서 사용할 수 없는 제조법입니다."; return false; }
+            if (!CanUseRecipe(recipe, out reason)) return false;
+            RecipeSpec spec = FactoryCatalog.GetRecipe(recipe);
+            if (spec.IsExtraction && environment != null && !SourceAvailable(e, spec.SourceResource))
+            { reason = "선택한 자원과 설비 아래의 자원 지형이 일치하지 않습니다."; return false; }
+            reason = ""; return true;
         }
 
-        static bool NeededBy(FactoryRecipe recipe, Resource resource) { Recipe(recipe, out var a, out _, out var b, out int bc, out _, out _, out _); return resource == a || (bc > 0 && resource == b); }
-        static int RecipeIngredientCount(FactoryRecipe recipe) { Recipe(recipe, out _, out _, out _, out int bc, out _, out _, out _); return bc > 0 ? 2 : 1; }
+        void RecoverBuffers(FactoryEntity e)
+        {
+            for (int i = 1; i < ResourceCatalog.Count; i++) { State.Recovered[i] += e.Input[i] + e.Output[i]; e.Input[i] = e.Output[i] = 0; }
+            e.Progress = 0; e.FluidProgress = 0;
+        }
+
+        void RecoverEntity(FactoryEntity e)
+        {
+            RecoverBuffers(e);
+            if (ResourceCatalog.IsTransportable(e.CargoResource)) { State.Recovered[(int)e.CargoResource]++; ClearCargo(e); }
+            if (e.ControllerInstalled) { State.Recovered[(int)Resource.ControlUnit]++; e.ControllerInstalled = false; }
+        }
+
+        bool PlacementSourceAvailable(FactoryKind kind, int x, int z, FactorySpec spec, out string reason)
+        {
+            if (kind != FactoryKind.Drill && kind != FactoryKind.WaterPump && kind != FactoryKind.OilPump) { reason = ""; return true; }
+            IIndustryEnvironment industry = environment as IIndustryEnvironment;
+            if (kind == FactoryKind.WaterPump)
+            {
+                if (environment == null) { reason = "물 지형을 확인할 환경이 필요합니다."; return false; }
+                for (int zz = z; zz < z + spec.Height; zz++) for (int xx = x; xx < x + spec.Width; xx++) if (industry != null && industry.HasWater(xx, zz)) { reason = ""; return true; }
+                reason = "물 위에 물 펌프를 배치해야 합니다."; return false;
+            }
+            Resource source = kind == FactoryKind.OilPump ? Resource.CrudeOil : Resource.Ore;
+            for (int zz = z; zz < z + spec.Height; zz++) for (int xx = x; xx < x + spec.Width; xx++)
+            {
+                bool found = source == Resource.Ore
+                    ? (environment != null ? environment.HasOre(xx, zz) : HasOre(xx, zz)) || (industry != null &&
+                        (industry.HasDeposit(Resource.CopperOre, xx, zz) || industry.HasDeposit(Resource.Coal, xx, zz) || industry.HasDeposit(Resource.Bauxite, xx, zz)))
+                    : industry != null && industry.HasDeposit(source, xx, zz);
+                if (found) { reason = ""; return true; }
+            }
+            if (environment == null)
+            {
+                reason = kind == FactoryKind.Drill ? "철 광맥 위에 채굴기를 배치해야 합니다." : "원유 매장지를 확인할 환경이 필요합니다.";
+                return false;
+            }
+            reason = source == Resource.CrudeOil ? "원유 매장지 위에 배치해야 합니다." : "철 광맥 위에 채굴기를 배치해야 합니다."; return false;
+        }
+
+        bool SourceAvailable(FactoryEntity e, Resource source)
+        {
+            if (environment == null)
+            {
+                if (source != Resource.Ore) return false;
+                FactorySpec legacySpec = FactoryCatalog.Get(e.Kind);
+                for (int z = e.Z; z < e.Z + legacySpec.Height; z++) for (int x = e.X; x < e.X + legacySpec.Width; x++) if (HasOre(x, z)) return true;
+                return false;
+            }
+            FactorySpec spec = FactoryCatalog.Get(e.Kind); IIndustryEnvironment industry = environment as IIndustryEnvironment;
+            for (int z = e.Z; z < e.Z + spec.Height; z++) for (int x = e.X; x < e.X + spec.Width; x++)
+            {
+                if (source == Resource.Water && industry != null && industry.HasWater(x, z)) return true;
+                if (source == Resource.Ore && environment.HasOre(x, z)) return true;
+                if (source != Resource.Water && source != Resource.Ore && industry != null && industry.HasDeposit(source, x, z)) return true;
+            }
+            return false;
+        }
+
+        static FactoryRecipe EffectiveRecipe(FactoryEntity e) => e.Kind == FactoryKind.Drill && e.Recipe == FactoryRecipe.None ? FactoryRecipe.IronMining : e.Recipe;
+        static bool HasInputs(FactoryEntity e, RecipeSpec recipe) => recipe.Inputs.All(a => e.Input[(int)a.Resource] >= a.Amount);
+        static bool HasOutputSpace(FactoryEntity e, RecipeSpec recipe) => Total(e.Output) + recipe.Outputs.Sum(a => a.Amount) <= FactoryCatalog.Get(e.Kind).OutputCapacity;
+        static int MaximumPossibleBatches(FactoryEntity e, RecipeSpec recipe)
+        {
+            int progress = recipe.Duration > 0 ? (int)Math.Floor(e.Progress / recipe.Duration) : 0;
+            int input = recipe.Inputs.Length == 0 ? int.MaxValue : recipe.Inputs.Min(a => e.Input[(int)a.Resource] / a.Amount);
+            int free = FactoryCatalog.Get(e.Kind).OutputCapacity - Total(e.Output), output = Math.Max(1, recipe.Outputs.Sum(a => a.Amount));
+            return Math.Max(0, Math.Min(progress, Math.Min(input, free / output)));
+        }
+        static bool HasDifferentFluid(FactoryEntity e, Resource resource)
+        { for (int i = 1; i < ResourceCatalog.Count; i++) if (e.Input[i] > 0 && (Resource)i != resource) return true; return false; }
         static bool Matches(Resource item, Resource filter) => filter == Resource.Coins || item == filter;
-        static bool IsCargo(Resource r) => (int)r >= 1 && (int)r <= 8;
-        static int Total(List<int> inventory) { int n = 0; for (int i = 1; i < Math.Min(9, inventory.Count); i++) n += inventory[i]; return n; }
+        static bool IsVerticalLink(FactoryKind kind) => kind == FactoryKind.ItemLift || kind == FactoryKind.FluidRiser;
+        static int Total(List<int> inventory) { int total = 0; for (int i = 1; i < inventory.Count; i++) total += inventory[i]; return total; }
+
         long StructureHash()
         {
             unchecked
             {
-                long hash = 1469598103934665603L;
-                hash = Mix(hash, State.Entities.Count);
+                long hash = 1469598103934665603L; hash = Mix(hash, State.Entities.Count);
                 foreach (FactoryEntity e in State.Entities)
                 {
-                    hash = Mix(hash, RuntimeHelpers.GetHashCode(e));
-                    hash = Mix(hash, e.Id); hash = Mix(hash, (int)e.Kind);
-                    hash = Mix(hash, e.X); hash = Mix(hash, e.Z);
+                    hash = Mix(hash, RuntimeHelpers.GetHashCode(e)); hash = Mix(hash, e.Id); hash = Mix(hash, (int)e.Kind);
+                    hash = Mix(hash, e.X); hash = Mix(hash, e.Z); hash = Mix(hash, e.Floor); hash = Mix(hash, e.LinkId);
+                    hash = Mix(hash, e.IsLinkSender ? 1 : 0); hash = Mix(hash, e.Direction);
                 }
                 return hash;
             }
         }
-        void RebuildEntityCaches(long structureHash)
+        void RebuildEntityCaches(long hash)
         {
-            processingOrder.Clear(); processingOrder.AddRange(State.Entities);
-            processingOrder.Sort((a, b) => a.Id.CompareTo(b.Id));
-            reverseTransportOrder.Clear();
-            for (int i = processingOrder.Count - 1; i >= 0; i--)
-            {
-                FactoryEntity e = processingOrder[i];
-                if (e.Kind == FactoryKind.Belt || e.Kind == FactoryKind.Splitter) reverseTransportOrder.Add(e);
-            }
-            cachedStructureHash = structureHash; hasStructureCache = true; hasPowerCache = false;
+            processingOrder.Clear(); processingOrder.AddRange(State.Entities); processingOrder.Sort((a, b) => a.Id.CompareTo(b.Id));
+            reverseTransportOrder.Clear(); for (int i = processingOrder.Count - 1; i >= 0; i--) if (processingOrder[i].Kind == FactoryKind.Belt || processingOrder[i].Kind == FactoryKind.Splitter) reverseTransportOrder.Add(processingOrder[i]);
+            cachedStructureHash = hash; hasStructureCache = true; hasPowerCache = false;
         }
         long PowerHash(long structureHash)
         {
-            long hash = Mix(structureHash, State.PowerBudget);
-            return Mix(hash, PowerDemandMultiplier.GetHashCode());
+            long hash = Mix(Mix(structureHash, State.PowerBudget), PowerDemandMultiplier.GetHashCode());
+            foreach (FactoryEntity e in processingOrder) { hash = Mix(hash, e.IsStopped ? 1 : 0); hash = Mix(hash, e.Paused ? 1 : 0); hash = Mix(hash, e.ClockPercent); }
+            return hash;
         }
-        void RecalculatePowerGraph(long powerHash)
+        void RecalculatePowerGraph(long hash)
         {
             powerNodes.Clear(); livePowerNodes.Clear();
             foreach (FactoryEntity e in processingOrder)
             {
                 if (e.Kind != FactoryKind.PowerInlet && e.Kind != FactoryKind.Pole) continue;
-                powerNodes.Add(e);
-                if (e.Kind == FactoryKind.PowerInlet && (environment == null || environment.CanSupplyPower(e))) livePowerNodes.Add(e.Id);
+                powerNodes.Add(e); if (!e.IsStopped && e.Kind == FactoryKind.PowerInlet && e.Floor == 0 && (environment == null || environment.CanSupplyPower(e))) livePowerNodes.Add(e.Id);
             }
             bool changed;
             do
@@ -377,64 +595,43 @@ namespace Riverworks
                 changed = false;
                 foreach (FactoryEntity node in powerNodes)
                 {
-                    if (livePowerNodes.Contains(node.Id)) continue;
+                    if (node.IsStopped || livePowerNodes.Contains(node.Id)) continue;
                     foreach (FactoryEntity source in powerNodes)
-                    {
-                        if (!livePowerNodes.Contains(source.Id) || GridDistance(node, source) > 6) continue;
-                        livePowerNodes.Add(node.Id); changed = true; break;
-                    }
+                        if (!source.IsStopped && livePowerNodes.Contains(source.Id) && GridDistance(node, source) <= 6) { livePowerNodes.Add(node.Id); changed = true; break; }
                 }
             } while (changed);
-            foreach (FactoryEntity node in powerNodes)
-            {
-                node.Powered = livePowerNodes.Contains(node.Id);
-                node.Status = node.Powered ? "전력망 연결" : "전력 인입구와 연결 필요";
-            }
-            PowerAvailable = livePowerNodes.Count > 0 ? Math.Max(0, State.PowerBudget) : 0;
-            PowerUsed = 0;
+            foreach (FactoryEntity node in powerNodes) { node.Powered = livePowerNodes.Contains(node.Id); node.Status = node.Paused ? "수동 일시정지" : node.AutomationBlocked ? "자동화 조건 대기" : node.Powered ? "전력망 연결" : "전력 인입구 연결 필요"; }
+            PowerAvailable = livePowerNodes.Count > 0 ? Math.Max(0, State.PowerBudget) : 0; PowerUsed = 0;
             foreach (FactoryEntity e in processingOrder)
             {
                 float demand = Demand(e);
-                if (demand <= 0)
-                {
-                    if (e.Kind != FactoryKind.PowerInlet && e.Kind != FactoryKind.Pole) e.Powered = true;
-                    continue;
-                }
-                bool covered = false;
-                foreach (FactoryEntity node in powerNodes)
-                {
-                    if (livePowerNodes.Contains(node.Id) && GridDistance(e, node) <= 4) { covered = true; break; }
-                }
-                e.Powered = covered && PowerUsed + demand <= PowerAvailable + .0001f;
-                if (e.Powered) PowerUsed += demand;
-                else e.Status = covered ? "도시 전력 예산 부족" : "전력망 범위 밖";
+                if (demand <= 0) { if (e.Kind != FactoryKind.PowerInlet && e.Kind != FactoryKind.Pole) e.Powered = !e.IsStopped; continue; }
+                bool covered = powerNodes.Any(n => livePowerNodes.Contains(n.Id) && GridDistance(e, n) <= 4);
+                e.Powered = !e.IsStopped && covered && PowerUsed + demand <= PowerAvailable + .0001f;
+                if (e.Powered) PowerUsed += demand; else e.Status = e.Paused ? "수동 일시정지" : e.AutomationBlocked ? "자동화 조건 대기" : covered ? "공장 전력 예산 부족" : "전력망 범위 밖";
             }
-            cachedPowerHash = powerHash; hasPowerCache = true;
+            cachedPowerHash = hash; hasPowerCache = true;
         }
         static long Mix(long hash, int value) => unchecked((hash ^ (uint)value) * 1099511628211L);
-        float Demand(FactoryEntity e) => (FactoryCatalog.Get(e.Kind)?.PowerDemand ?? 0) * PowerDemandMultiplier;
+        float Demand(FactoryEntity e)
+        {
+            if (e.IsStopped) return 0;
+            float clock = FactoryCatalog.IsClockable(e.Kind) ? e.ClockPercent / 100f : 1f;
+            return (FactoryCatalog.Get(e.Kind)?.PowerDemand ?? 0) * PowerDemandMultiplier * clock * clock;
+        }
         FactoryEntity Find(int id) => State.Entities.FirstOrDefault(e => e.Id == id);
         static void ClearCargo(FactoryEntity e) { e.CargoResource = Resource.Coins; e.CargoProgress = 0; }
-        static void EnsureInventory(List<int> values) { while (values.Count < 9) values.Add(0); if (values.Count > 9) values.RemoveRange(9, values.Count - 9); values[0] = 0; }
-        void Normalize()
-        {
-            EnsureInventory(State.Produced); EnsureInventory(State.Exported); EnsureInventory(State.Recovered);
-            int maxId = 0;
-            foreach (FactoryEntity e in State.Entities) { EnsureInventory(e.Input); EnsureInventory(e.Output); if (e.Id > maxId) maxId = e.Id; }
-            State.NextEntityId = Math.Max(State.NextEntityId, maxId + 1);
-        }
-        static void ValidateInventory(List<int> values) { if (values.Count != 9 || values.Any(v => v < 0) || values[0] != 0) throw new InvalidDataException("잘못된 공장 누적 물자 데이터입니다."); }
         static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
-        static bool HasOreInFootprint(FactoryEntity e) { FactorySpec s = FactoryCatalog.Get(e.Kind); for (int z = e.Z; z < e.Z + s.Height; z++) for (int x = e.X; x < e.X + s.Width; x++) if (HasOre(x, z)) return true; return false; }
         public static int GridDistance(FactoryEntity a, FactoryEntity b)
         {
-            if (a == null) throw new ArgumentNullException(nameof(a));
-            if (b == null) throw new ArgumentNullException(nameof(b));
-            FactorySpec sa = FactoryCatalog.Get(a.Kind), sb = FactoryCatalog.Get(b.Kind);
-            if (sa == null || sb == null) throw new ArgumentException("Unknown factory entity kind.");
-            int dx = AxisDistance(a.X, a.X + sa.Width - 1, b.X, b.X + sb.Width - 1);
-            int dz = AxisDistance(a.Z, a.Z + sa.Height - 1, b.Z, b.Z + sb.Height - 1);
-            return Math.Max(dx, dz);
+            if (a == null) throw new ArgumentNullException(nameof(a)); if (b == null) throw new ArgumentNullException(nameof(b));
+            FactorySpec sa = FactoryCatalog.Get(a.Kind), sb = FactoryCatalog.Get(b.Kind); if (sa == null || sb == null) throw new ArgumentException("Unknown factory entity kind.");
+            if (a.Floor != b.Floor)
+            {
+                bool verticalPoles = a.Kind == FactoryKind.Pole && b.Kind == FactoryKind.Pole && a.X == b.X && a.Z == b.Z && Math.Abs(a.Floor - b.Floor) == 1;
+                return verticalPoles ? 1 : int.MaxValue;
+            }
+            return Math.Max(AxisDistance(a.X, a.X + sa.Width - 1, b.X, b.X + sb.Width - 1), AxisDistance(a.Z, a.Z + sa.Height - 1, b.Z, b.Z + sb.Height - 1));
         }
         static int AxisDistance(int aMin, int aMax, int bMin, int bMax) => aMax < bMin ? bMin - aMax : bMax < aMin ? aMin - bMax : 0;
         static void CellInFront(FactoryEntity e, out int x, out int z)

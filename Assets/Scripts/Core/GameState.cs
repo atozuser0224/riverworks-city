@@ -3,7 +3,15 @@ using System.Collections.Generic;
 
 namespace Riverworks
 {
-    public enum Resource { Coins, Timber, Stone, Grain, Flour, Bread, Ore, Steel, Tools }
+    public enum Resource
+    {
+        Coins = 0, Timber = 1, Stone = 2, Grain = 3, Flour = 4, Bread = 5, Ore = 6, Steel = 7, Tools = 8,
+        CopperOre = 9, Copper = 10, Coal = 11, Gear = 12, Wire = 13, SteelBeam = 14, SteelPipe = 15,
+        Plastic = 16, Rubber = 17, Sulfur = 18, Circuit = 19, Motor = 20, AdvancedCircuit = 21,
+        Computer = 22, Battery = 23, ModularFrame = 24, ControlUnit = 25, Bauxite = 26, Silica = 27,
+        AluminumScrap = 28, Aluminum = 29, AluminumCasing = 30, Water = 31, CrudeOil = 32,
+        HeavyOil = 33, PetroleumGas = 34, SulfuricAcid = 35, AluminaSolution = 36, Fuel = 37
+    }
     public enum BuildingKind { None, TownHall, Road, House, Lumberyard, Quarry, Farm, Mill, Bakery, Mine, Smelter, Workshop, Windmill, Park, Warehouse, Market, StudyHouse, Academy, SteamPlant }
     public enum TerrainKind { Grass, Forest, Rock, Water }
     public enum Era { Medieval, Renaissance, Industrial }
@@ -27,7 +35,15 @@ namespace Riverworks
         MetallurgicalEfficiency,
         Electrification,
         MassProduction,
-        Automation
+        Automation,
+        FluidHandling,
+        OilRefining,
+        Petrochemistry,
+        Electronics,
+        AluminumProcessing,
+        EnergyStorage,
+        AdvancedManufacturing,
+        IndustrialControl
     }
 
     [Serializable]
@@ -43,13 +59,13 @@ namespace Riverworks
         public List<float> LogisticsInput = NewLogisticsBuffer();
         public List<float> LogisticsOutput = NewLogisticsBuffer();
 
-        public static List<float> NewLogisticsBuffer() => new List<float>(new float[9]);
+        public static List<float> NewLogisticsBuffer() => new List<float>(new float[ResourceCatalog.InventoryCount]);
     }
 
     [Serializable]
     public class GameState
     {
-        public int Version = 4, Size = 21, Day, Population, Happiness;
+        public int Version = 6, Size = 21, Day, Population, Happiness;
         public float Coins;
         public float DayProgressSeconds;
         public List<float> Stock = new List<float>();
@@ -70,11 +86,12 @@ namespace Riverworks
         public FactoryState Factory = FactoryState.CreateCityGrid();
         public FactoryState ArchivedFactory;
         public TutorialProgress Tutorial;
+        public List<CityProjectState> CityProjects = new List<CityProjectState>();
 
         public static GameState CreateNew()
         {
             var state = new GameState { Coins = 1100, Population = 8, Happiness = 72, ResearchPoints = 10 };
-            for (int i = 0; i < Enum.GetValues(typeof(Resource)).Length; i++) state.Stock.Add(0);
+            for (int i = 0; i < ResourceCatalog.InventoryCount; i++) state.Stock.Add(0);
             state.Stock[(int)Resource.Coins] = state.Coins;
             state.Stock[(int)Resource.Timber] = 90;
             state.Stock[(int)Resource.Stone] = 65;
@@ -107,6 +124,11 @@ namespace Riverworks
             state.Cells[9 * state.Size + 7].Terrain = TerrainKind.Forest;
             state.Cells[10 * state.Size + 13].Terrain = TerrainKind.Rock;
             state.Cells[11 * state.Size + 13].Terrain = TerrainKind.Rock;
+            // Surveyed industrial deposits are visible terrain landmarks on new maps.
+            state.Cells[10 * state.Size + 16].Terrain = TerrainKind.Rock;
+            state.Cells[16 * state.Size + 10].Terrain = TerrainKind.Rock;
+            state.Cells[16 * state.Size + 16].Terrain = TerrainKind.Rock;
+            state.Cells[4 * state.Size + 16].Terrain = TerrainKind.Grass;
             state.Tutorial = TutorialProgress.Create(state);
             return state;
 

@@ -81,8 +81,8 @@ namespace Riverworks
 
             GameState fixture = SharedCityScenario.Create();
             Require(fixture.Cells.Any(cell => cell.Building == BuildingKind.House) &&
-                    fixture.Factory.Entities.Count > 0 && fixture.Technologies.Count == 18,
-                "shared fixture contains a rich city, factory equipment, and all 18 technologies");
+                    fixture.Factory.Entities.Count > 0 && fixture.Technologies.Count == TechCatalog.All.Count(),
+                "shared fixture contains a rich city, factory equipment, and every catalog technology");
             Require(SaveStore.TrySave(game.SavePath, fixture, out string saveError),
                 "shared city fixture saves before UI verification: " + saveError);
             game.LoadGame();
@@ -539,13 +539,14 @@ namespace Riverworks
             RectTransform window = Root("FactoryConfigureCard") as RectTransform;
             Transform recipe = Root("FactoryRecipeSection");
             Require(window != null && recipe != null && recipe.gameObject.activeInHierarchy &&
-                    recipe.GetComponent<HorizontalLayoutGroup>() != null,
-                "assembler configuration uses its horizontal recipe layout at " + size);
+                    recipe.GetComponent<GridLayoutGroup>() != null,
+                "assembler configuration uses its responsive recipe grid at " + size);
             Canvas.ForceUpdateCanvases();
             Button[] recipes = recipe.GetComponentsInChildren<Button>(false).OrderBy(button =>
                 ((RectTransform)button.transform).anchoredPosition.x).ToArray();
-            Require(recipes.Length == 3 && AdjacentWithoutHole(recipe as RectTransform, recipes),
-                "assembler recipe row contains three compatible choices without a blank slot at " + size);
+            int assemblerChoices = FactoryCatalog.RecipesFor(FactoryKind.Assembler).Count;
+            Require(recipes.Length == assemblerChoices,
+                "assembler recipe grid contains all " + assemblerChoices + " catalog-compatible choices at " + size);
             float recipeHeight = window.rect.height;
 
             Require(game.Factory.SelectAt(18, 16), "fixture inserter is selectable for configuration layout at " + size);
@@ -553,16 +554,17 @@ namespace Riverworks
             Transform filter = Root("FactoryFilterSection");
             float filterHeight = window.rect.height;
             Require(filter != null && filter.gameObject.activeInHierarchy && filter.GetComponent<GridLayoutGroup>() != null &&
-                    filter.GetComponentsInChildren<Button>(false).Length == 9,
-                "inserter configuration uses a dense nine-filter grid at " + size);
+                    filter.GetComponentsInChildren<Button>(false).Length == ResourceCatalog.SolidResources.Count + 1,
+                "inserter configuration exposes auto plus every solid-resource filter at " + size);
 
             Require(game.Factory.SelectAt(22, 24), "fixture storage is selectable for configuration layout at " + size);
             Canvas.ForceUpdateCanvases();
             Transform feed = Root("FactoryFeedSection");
             float feedHeight = window.rect.height;
             Require(feed != null && feed.gameObject.activeInHierarchy && feed.GetComponent<GridLayoutGroup>() != null &&
-                    feed.GetComponentsInChildren<Button>(false).Length == 8 && filterHeight > feedHeight && feedHeight > recipeHeight,
-                "factory configuration height follows filter, feed, and recipe content at " + size);
+                    feed.GetComponentsInChildren<Button>(false).Length == ResourceCatalog.SolidResources.Count &&
+                    Mathf.Approximately(filterHeight, feedHeight) && Mathf.Approximately(feedHeight, recipeHeight),
+                "factory configuration uses the expanded scrollable layout for filter, feed, and recipe content at " + size);
 
             Require(game.Factory.SelectAt(SharedCityScenario.ProcessorMicroX, SharedCityScenario.ProcessorMicroZ),
                 "fixture assembler selection is restored after configuration layout checks at " + size);
@@ -701,7 +703,7 @@ namespace Riverworks
             {
                 "BuildChoices", "Inspector", "Objectives", "MenuOverlay", "OverviewOverlay",
                 "TerritoryOverlay", "TradeOverlay", "ResearchOverlay", "HelpOverlay",
-                "NewGameConfirm", "FactoryConfigureOverlay"
+                "NewGameConfirm", "FactoryConfigureOverlay", "AutomationRulePanel", "CityProjectOverlay"
             };
             foreach (string rootName in hidden)
                 Check(!IsActive(rootName), rootName + " is hidden while idle at " + phase);
@@ -816,7 +818,7 @@ namespace Riverworks
         void VerifyAllResearchAccessible(string size)
         {
             TechSpec[] specs = TechCatalog.All.Where(spec => spec != null).ToArray();
-            Require(specs.Length == 18, "research catalog still contains exactly 18 technologies at " + size);
+            Require(specs.Length == TechCatalog.All.Count() && specs.Length == 26, "research catalog contains all 26 current technologies at " + size);
             ResearchTreeView tree = game.CityHud.ResearchTree;
             Require(tree != null && tree.Graph != null && tree.Layout != null && tree.Details != null,
                 "research graph exposes its model, layout, and detail panel at " + size);
@@ -824,9 +826,9 @@ namespace Riverworks
                     tree.TreeScroll.viewport == tree.GraphViewport && tree.TreeScroll.content == tree.GraphContent &&
                     tree.GraphViewport.name == "ResearchGraphViewport" && tree.GraphContent.name == "ResearchGraphContent",
                 "research uses one global two-dimensional viewport at " + size);
-            Require(tree.Nodes.Count == 18 && tree.Graph.Edges.Count == 19 && tree.Connections.Count == 19 &&
+            Require(tree.Nodes.Count == specs.Length && tree.Graph.Edges.Count == 35 && tree.Connections.Count == tree.Graph.Edges.Count &&
                     tree.Graph.Edges.All(edge => tree.Connections.ContainsKey(edge)),
-                "research graph renders all 18 nodes and 19 prerequisite connections at " + size);
+                "research graph renders all 26 nodes and 35 prerequisite connections at " + size);
             Require(tree.VerifyLayout(out string layoutReason),
                 "research graph layout verifies at " + size + ": " + layoutReason);
             int accessible = 0;
@@ -861,7 +863,7 @@ namespace Riverworks
                 Check(nodeText.Length > 0 && nodeText.All(text => TextRenderFits(text, node, false, out _)),
                     "research node text fits its fixed card: " + spec.Id + " at " + size);
             }
-            Require(accessible == 18, "all 18 research nodes are reachable and selectable through graph focus at " + size + " (18/18)");
+            Require(accessible == specs.Length, "all " + specs.Length + " research nodes are reachable and selectable through graph focus at " + size);
             tree.ResetView();
             Canvas.ForceUpdateCanvases();
             Require(IsButtonFirstHit("ResearchNode_Stonecraft") && IsButtonFirstHit("ResearchNode_CropRotation"),
