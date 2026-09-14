@@ -6,6 +6,7 @@ param(
     [switch]$FeelRuntime,
     [switch]$TutorialRuntime,
     [switch]$ResidentActivityRuntime,
+    [switch]$ResearchTreeRuntime,
     [string]$ExecutablePath,
     [ValidateRange(1, 3600)]
     [int]$RuntimeTimeoutSeconds = 300
@@ -110,7 +111,7 @@ if ($dotnetExitCode -ne 0) {
     throw "C# 테스트가 종료 코드 ${dotnetExitCode}로 실패했습니다."
 }
 
-if (-not $Runtime -and -not $FactoryRuntime -and -not $CompactUiRuntime -and -not $FeelRuntime -and -not $TutorialRuntime -and -not $ResidentActivityRuntime) {
+if (-not $Runtime -and -not $FactoryRuntime -and -not $CompactUiRuntime -and -not $FeelRuntime -and -not $TutorialRuntime -and -not $ResidentActivityRuntime -and -not $ResearchTreeRuntime) {
     Write-Host 'C# 테스트 성공. 실행 파일 검증은 -Runtime 또는 -FactoryRuntime을 지정하면 추가로 실행됩니다.'
     return
 }
@@ -168,6 +169,12 @@ if ($ResidentActivityRuntime) {
         if ($otherGuid -and $otherGuid -ne $residentBuildGuid) {
             throw "주민 활동과 게임 실행 결과의 빌드 GUID가 다릅니다: $residentBuildGuid / $otherGuid"
         }
+    }
+}
+if ($ResearchTreeRuntime) {
+    $researchBuildGuid = Invoke-RuntimeSmoke -Name '연결형 연구 지도' -SmokeFlag '-riverworks-research-tree-smoke' -OutputDirectory (Join-Path $artifactDirectory 'ResearchTreeSmoke') -ResultFileName 'research-tree-results.txt' -LogFileName 'research-tree-runtime.log' -SuccessMarker 'RIVERWORKS_RESEARCH_TREE_SMOKE_PASS' -PlayerPath $ExecutablePath -TimeoutSeconds $RuntimeTimeoutSeconds
+    foreach ($otherGuid in @($runtimeBuildGuid, $factoryBuildGuid, $compactUiBuildGuid, $feelBuildGuid, $tutorialBuildGuid)) {
+        if ($otherGuid -and $otherGuid -ne $researchBuildGuid) { throw '연구 지도 검사와 다른 게임 실행 결과의 빌드 GUID가 다릅니다.' }
     }
 }
 Write-Host '요청한 모든 테스트가 성공했습니다.'

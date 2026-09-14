@@ -65,6 +65,8 @@ namespace Riverworks
             {
                 Assert(controller.ResearchOpen,"research tree opens and blocks the world");
                 VerifyResearchCatalog();
+                controller.CityHud.ResearchTree.FocusTechnology(TechId.Stonecraft);
+                Canvas.ForceUpdateCanvases();
                 Click("Button_연구 시작_Stonecraft");
                 Assert(!controller.ResearchOpen && controller.State.ActiveResearch==TechId.Stonecraft,"research starts through the rendered UI button");
                 VerifyActiveResearchSave();
@@ -224,49 +226,41 @@ namespace Riverworks
             int enumTechnologyCount=Enum.GetValues(typeof(TechId)).Cast<TechId>().Count(id=>id!=TechId.None);
             Assert(specs.Length==enumTechnologyCount,"technology catalog covers every non-None technology ID dynamically");
             Assert(specs.Select(s=>s.Id).Distinct().Count()==specs.Length,"technology catalog contains no duplicate IDs");
-            Assert(specs.All(spec=>FindButton("Button_연구 시작_"+spec.Id)!=null),"research tree renders one button for every catalog technology");
-            ScrollRect[] scrolls=FindResearchScrolls();
-            Era[] eras=specs.Select(spec=>spec.Era).Distinct().ToArray();
-            Assert(scrolls.Length==eras.Length && eras.All(era=>scrolls.Count(scroll=>scroll.name=="ResearchScroll_"+era && scroll.viewport==scroll.GetComponent<RectTransform>() && scroll.content!=null && scroll.content.name=="ResearchContent_"+era && scroll.content.parent==scroll.viewport)==1),"research tree renders one matching vertical viewport and content per catalog era");
-            ScrollRect eraScroll=FindResearchEraScroll();
-            Assert(eraScroll!=null && eraScroll.horizontal && !eraScroll.vertical && eraScroll.viewport==eraScroll.GetComponent<RectTransform>() && eraScroll.content!=null && eraScroll.content.name=="ResearchEraStrip" && eraScroll.content.parent==eraScroll.viewport,"research tree provides a separate outer horizontal era scroller");
-            Canvas.ForceUpdateCanvases();
-            Assert(scrolls.Any(scroll=>scroll.content.rect.height>(scroll.viewport??scroll.GetComponent<RectTransform>()).rect.height+.5f || scroll.content.rect.width>(scroll.viewport??scroll.GetComponent<RectTransform>()).rect.width+.5f),"expanded research tree content extends beyond its viewport");
+            ResearchTreeView tree=controller.CityHud.ResearchTree;
+            Assert(tree!=null && tree.Graph!=null && tree.Layout!=null && tree.Details!=null,"research tree exposes its graph, layout, and detail panel");
+            Assert(tree.TreeScroll!=null && tree.TreeScroll.horizontal && tree.TreeScroll.vertical && tree.TreeScroll.viewport==tree.GraphViewport && tree.TreeScroll.content==tree.GraphContent && tree.GraphViewport.name=="ResearchGraphViewport" && tree.GraphContent.name=="ResearchGraphContent","research tree uses one global two-dimensional graph viewport");
+            Assert(tree.Nodes.Count==18 && specs.All(spec=>tree.NodeFor(spec.Id)!=null && tree.NodeFor(spec.Id).name=="ResearchNode_"+spec.Id),"research tree renders all 18 selectable graph nodes");
+            Assert(specs.All(spec=>tree.StartButtonFor(spec.Id)!=null && tree.StartButtonFor(spec.Id).name=="Button_연구 시작_"+spec.Id),"research tree retains one stable start button for every technology");
+            Assert(tree.Graph.Edges.Count==19 && tree.Connections.Count==19 && tree.Graph.Edges.All(edge=>tree.Connections.ContainsKey(edge)),"research tree renders all 19 prerequisite connections");
+            Assert(tree.VerifyLayout(out var reason),"global research graph layout is valid: "+reason);
+            Assert(tree.Layout.ContentSize.x>tree.GraphViewport.rect.width || tree.Layout.ContentSize.y>tree.GraphViewport.rect.height,"global research graph extends beyond its viewport");
+            foreach(TechSpec spec in specs)
+            {
+                Rect logical=tree.Layout.NodeRect(spec.Id);
+                RectTransform node=tree.NodeFor(spec.Id);
+                Button start=tree.StartButtonFor(spec.Id);
+                Assert(logical.x>=0 && logical.y>=0 && Mathf.Approximately(logical.width,224f) && Mathf.Approximately(logical.height,156f),"research node has a positive-down graph position and fixed geometry: "+spec.Id);
+                Assert(node!=null && Mathf.Approximately(node.rect.width,224f) && Mathf.Approximately(node.rect.height,156f) && start!=null && start.gameObject.activeSelf,"research node and its start action remain present: "+spec.Id);
+            }
         }
         void VerifyResearchScroll()
         {
             VerifyResearchCatalog();
-            TechSpec last=TechCatalog.All.Last();
-            ScrollRect lastScroll=FindResearchScroll(last.Id);
-            Assert(lastScroll!=null,"last catalog technology belongs to a research viewport");
-            if(lastScroll.vertical)lastScroll.verticalNormalizedPosition=0;
-            if(lastScroll.horizontal)lastScroll.horizontalNormalizedPosition=1;
+            ResearchTreeView tree=controller.CityHud.ResearchTree;
+            foreach(TechSpec spec in TechCatalog.All)
+            {
+                tree.FocusTechnology(spec.Id);
+                Canvas.ForceUpdateCanvases();
+                AssertFirstHit("ResearchNode_"+spec.Id);
+                Assert(tree.SelectedTechnology==spec.Id && tree.Details.SelectedTechnology==spec.Id,"focus selects the matching graph node and details: "+spec.Id);
+            }
+            tree.ResetView();
             Canvas.ForceUpdateCanvases();
-            AssertFirstHit("Button_연구 시작_"+last.Id);
-            ScrollRect firstScroll=FindResearchScroll(TechId.CropRotation);
-            Assert(firstScroll!=null,"first catalog technology belongs to a research viewport");
-            if(firstScroll.vertical)firstScroll.verticalNormalizedPosition=1;
-            if(firstScroll.horizontal)firstScroll.horizontalNormalizedPosition=0;
-            Canvas.ForceUpdateCanvases();
-            AssertFirstHit("Button_연구 시작_CropRotation");
-            Assert(true,"research scrolling reaches the first and last catalog technologies at "+Screen.width+"x"+Screen.height);
+            AssertFirstHit("ResearchNode_Stonecraft");
+            AssertFirstHit("ResearchNode_CropRotation");
+            Assert(true,"global research graph focus reaches all 18 technologies and reset reveals both roots at "+Screen.width+"x"+Screen.height);
         }
         static Button FindButton(string name) => FindObjectsByType<Button>(FindObjectsInactive.Include).FirstOrDefault(button=>button.name==name);
-        static ScrollRect FindResearchScroll(TechId id)
-        {
-            Button button=FindButton("Button_연구 시작_"+id);
-            return button==null?null:button.GetComponentInParent<ScrollRect>();
-        }
-        static ScrollRect[] FindResearchScrolls()
-        {
-            Transform overlay=FindObjectsByType<Transform>(FindObjectsInactive.Include).FirstOrDefault(item=>item.name=="ResearchOverlay");
-            return overlay==null?Array.Empty<ScrollRect>():FindObjectsByType<ScrollRect>(FindObjectsInactive.Include).Where(item=>item.transform.IsChildOf(overlay) && item.vertical && !item.horizontal && item.name.StartsWith("ResearchScroll_",StringComparison.Ordinal)).ToArray();
-        }
-        static ScrollRect FindResearchEraScroll()
-        {
-            Transform overlay=FindObjectsByType<Transform>(FindObjectsInactive.Include).FirstOrDefault(item=>item.name=="ResearchOverlay");
-            return overlay==null?null:FindObjectsByType<ScrollRect>(FindObjectsInactive.Include).FirstOrDefault(item=>item.transform.IsChildOf(overlay) && item.name=="ResearchEraViewport");
-        }
         IEnumerator Capture(string name,string mustDifferFrom)
         {
             float deadline=Time.realtimeSinceStartup+5f;string lastReason="no frame captured";

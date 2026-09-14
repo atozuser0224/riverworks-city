@@ -408,21 +408,21 @@ namespace Riverworks
             game.ToggleResearch();
             yield return null;
             Canvas.ForceUpdateCanvases();
+            ResearchTreeView tree = game.CityHud.ResearchTree;
             foreach (TechId id in new[] { TechId.Stonecraft, TechId.CropRotation })
             {
-                Button button = FindButton("Button_연구 시작_" + id);
-                RectTransform card = Root("TechCard_" + id) as RectTransform;
-                ScrollRect scroll = card == null ? null : card.GetComponentInParent<ScrollRect>();
-                if (scroll != null) scroll.verticalNormalizedPosition = 1f;
+                tree.FocusTechnology(id);
                 Canvas.ForceUpdateCanvases();
-                Text effect = Root("TechEffect_" + id) == null ? null : Root("TechEffect_" + id).GetComponent<Text>();
-                Require(button != null && button.gameObject.activeInHierarchy && button.interactable &&
-                        card != null && scroll != null && ContainsRect(scroll.viewport, card, 1f) &&
-                        effect != null && effect.gameObject.activeInHierarchy &&
-                        card.rect.height >= 183.5f && card.rect.height + .5f >= effect.preferredHeight + 84f &&
-                        TextRenderFits(effect, card, false, out _),
-                    id + " is an available, initially visible research action in the early-state fixture at " + size);
+                Button nodeButton = FindButton("ResearchNode_" + id);
+                Button startButton = tree.StartButtonFor(id);
+                RectTransform node = tree.NodeFor(id);
+                Require(nodeButton != null && IsFirstRaycastTarget(nodeButton) && startButton != null &&
+                        startButton.gameObject.activeInHierarchy && startButton.interactable && node != null &&
+                        Mathf.Approximately(node.rect.width, 224f) && Mathf.Approximately(node.rect.height, 156f) &&
+                        tree.SelectedTechnology == id && tree.Details.SelectedTechnology == id,
+                    id + " is an available, focusable root in the early-state research graph at " + size);
             }
+            tree.ResetView();
             game.ToggleResearch();
 
             Require(SaveStore.TrySave(game.SavePath, game.State, out string resetSaveError),
@@ -817,59 +817,55 @@ namespace Riverworks
         {
             TechSpec[] specs = TechCatalog.All.Where(spec => spec != null).ToArray();
             Require(specs.Length == 18, "research catalog still contains exactly 18 technologies at " + size);
+            ResearchTreeView tree = game.CityHud.ResearchTree;
+            Require(tree != null && tree.Graph != null && tree.Layout != null && tree.Details != null,
+                "research graph exposes its model, layout, and detail panel at " + size);
+            Require(tree.TreeScroll != null && tree.TreeScroll.horizontal && tree.TreeScroll.vertical &&
+                    tree.TreeScroll.viewport == tree.GraphViewport && tree.TreeScroll.content == tree.GraphContent &&
+                    tree.GraphViewport.name == "ResearchGraphViewport" && tree.GraphContent.name == "ResearchGraphContent",
+                "research uses one global two-dimensional viewport at " + size);
+            Require(tree.Nodes.Count == 18 && tree.Graph.Edges.Count == 19 && tree.Connections.Count == 19 &&
+                    tree.Graph.Edges.All(edge => tree.Connections.ContainsKey(edge)),
+                "research graph renders all 18 nodes and 19 prerequisite connections at " + size);
+            Require(tree.VerifyLayout(out string layoutReason),
+                "research graph layout verifies at " + size + ": " + layoutReason);
             int accessible = 0;
             foreach (TechSpec spec in specs)
             {
-                Button button = FindButton("Button_연구 시작_" + spec.Id);
-                RectTransform card = Root("TechCard_" + spec.Id) as RectTransform;
-                if (button == null || card == null)
+                tree.FocusTechnology(spec.Id);
+                Canvas.ForceUpdateCanvases();
+                Button nodeButton = FindButton("ResearchNode_" + spec.Id);
+                Button startButton = tree.StartButtonFor(spec.Id);
+                RectTransform node = tree.NodeFor(spec.Id);
+                if (nodeButton == null || startButton == null || node == null)
                 {
-                    RecordError("Missing research card or stable button for " + spec.Id + " at " + size);
+                    RecordError("Missing research node or stable start button for " + spec.Id + " at " + size);
                     continue;
                 }
-                ScrollRect scroll = card.GetComponentInParent<ScrollRect>();
-                bool reached = false;
-                if (scroll != null)
+                bool reached = IsFirstRaycastTarget(nodeButton);
+                Check(reached, "research graph focus makes the node raycastable: " + spec.Id + " at " + size);
+                if (reached)
                 {
-                    for (int step = 0; step <= 32 && !reached; step++)
-                    {
-                        scroll.StopMovement();
-                        scroll.verticalNormalizedPosition = 1f - step / 32f;
-                        Canvas.ForceUpdateCanvases();
-                        reached = ContainsRect(scroll.viewport, card, 1.5f);
-                    }
+                    Click("ResearchNode_" + spec.Id);
+                    Canvas.ForceUpdateCanvases();
+                    accessible++;
                 }
-                bool completed = TechCatalog.Has(game.State, spec.Id);
-                if (completed)
-                {
-                    Text effect = Root("TechEffect_" + spec.Id) == null ? null : Root("TechEffect_" + spec.Id).GetComponent<Text>();
-                    Check(!button.gameObject.activeSelf && card.rect.height <= 82.5f && effect != null &&
-                          effect.gameObject.activeInHierarchy && TextRenderFits(effect, card, true, out _) &&
-                          scroll != null && ContainsRect(scroll.viewport, effect.rectTransform, 1.5f),
-                        "completed research card is compact and keeps one unclipped effect line: " + spec.Id + " at " + size);
-                }
-                else
-                {
-                    RectTransform rect = button.transform as RectTransform;
-                    Check(button.gameObject.activeSelf && rect != null && rect.rect.width >= 200f &&
-                          rect.rect.height >= HudStyle.TouchSize - .5f,
-                        "available or locked research card retains a full-width action: " + spec.Id + " at " + size);
-                }
-                if (reached) accessible++;
-                else RecordError("Research card cannot be reached by its internal scroll viewport: " + spec.Id + " at " + size);
+                RectTransform action = startButton.transform as RectTransform;
+                Check(startButton.gameObject.activeSelf && action != null && action.rect.width >= 200f &&
+                      action.rect.height >= HudStyle.TouchSize - .5f && ContainsRect(node, action, 1f),
+                    "research node retains its visible 208x44 start action: " + spec.Id + " at " + size);
+                Check(Mathf.Approximately(node.rect.width, 224f) && Mathf.Approximately(node.rect.height, 156f) &&
+                      tree.SelectedTechnology == spec.Id && tree.Details.SelectedTechnology == spec.Id,
+                    "research node geometry and detail selection match: " + spec.Id + " at " + size);
+                Text[] nodeText = node.GetComponentsInChildren<Text>(false);
+                Check(nodeText.Length > 0 && nodeText.All(text => TextRenderFits(text, node, false, out _)),
+                    "research node text fits its fixed card: " + spec.Id + " at " + size);
             }
-            Require(accessible == 18, "all 18 research cards are reachable through their internal scroll views at " + size + " (18/18)");
-            Transform research = Root("ResearchOverlay");
-            if (research != null)
-            {
-                foreach (ScrollRect scroll in research.GetComponentsInChildren<ScrollRect>(true))
-                {
-                    scroll.StopMovement();
-                    if (scroll.vertical) scroll.verticalNormalizedPosition = 1f;
-                    if (scroll.horizontal) scroll.horizontalNormalizedPosition = 0f;
-                }
-                Canvas.ForceUpdateCanvases();
-            }
+            Require(accessible == 18, "all 18 research nodes are reachable and selectable through graph focus at " + size + " (18/18)");
+            tree.ResetView();
+            Canvas.ForceUpdateCanvases();
+            Require(IsButtonFirstHit("ResearchNode_Stonecraft") && IsButtonFirstHit("ResearchNode_CropRotation"),
+                "research reset restores both root technologies to the initial view at " + size);
         }
 
         void CloseInspectorThroughUi(string phase)
