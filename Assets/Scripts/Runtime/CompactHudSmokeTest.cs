@@ -21,6 +21,9 @@ namespace Riverworks
         Hud hud;
         string output;
         bool finished;
+        bool baselineCaptureOnly;
+        int baselineCaptureCount;
+        UiSmokeViewport smokeViewport;
         int suppressedErrors;
         readonly List<string> results = new List<string>();
         readonly List<string> errors = new List<string>();
@@ -29,6 +32,7 @@ namespace Riverworks
         {
             game = controller;
             string[] arguments = Environment.GetCommandLineArgs();
+            baselineCaptureOnly = Array.IndexOf(arguments, "-riverworks-ui-baseline") >= 0;
             int outputAt = Array.IndexOf(arguments, "-riverworks-output");
             output = outputAt >= 0 && outputAt + 1 < arguments.Length
                 ? arguments[outputAt + 1]
@@ -38,7 +42,12 @@ namespace Riverworks
             StartCoroutine(GuardedRun());
         }
 
-        void OnDestroy() { Application.logMessageReceived -= OnLog; }
+        void OnDestroy()
+        {
+            smokeViewport?.Dispose();
+            smokeViewport = null;
+            Application.logMessageReceived -= OnLog;
+        }
 
         void OnLog(string message, string trace, LogType type)
         {
@@ -92,6 +101,17 @@ namespace Riverworks
             hud = game.CityHud;
             Require(hud != null && hud.gameObject.activeInHierarchy, "one active compact city HUD is available");
             Require(EventSystem.current != null, "an EventSystem is available for real UI raycasts");
+
+            if (baselineCaptureOnly)
+            {
+                results.Add("MODE BASELINE_CAPTURE_ONLY");
+                results.Add("VALIDATION NOT_RUN - screenshots are BEFORE-reference evidence only");
+                results.Add("CAPTURE_MODE OFFSCREEN_RENDER_TARGET");
+                results.Add("DEVICE_VALIDATION NOT_RUN - captures do not prove a real window or Android layout");
+                yield return CaptureBaselineStates();
+                yield break;
+            }
+
             VerifyHudAssets();
 
             int[,] resolutions = { { 1600, 900 }, { 1280, 720 } };
@@ -188,6 +208,89 @@ namespace Riverworks
 
             Check(errors.Count == 0, "compact HUD runtime emitted no error, exception, or assertion logs");
             game.SetSpeed(0);
+        }
+
+        IEnumerator CaptureBaselineStates()
+        {
+            int[,] resolutions = { { 1600, 900 }, { 1280, 720 }, { 1024, 768 }, { 2048, 1536 } };
+            for (int resolution = 0; resolution < resolutions.GetLength(0); resolution++)
+            {
+                int width = resolutions[resolution, 0];
+                int height = resolutions[resolution, 1];
+                string size = width + "x" + height;
+                smokeViewport?.Dispose();
+                smokeViewport = new UiSmokeViewport(game.CameraRig.Camera, hud.GetComponent<Canvas>(), width, height);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                results.Add("VIEWPORT " + size + " CANVAS " +
+                    Mathf.RoundToInt(hud.GetComponent<Canvas>().pixelRect.width) + "x" +
+                    Mathf.RoundToInt(hud.GetComponent<Canvas>().pixelRect.height) +
+                    " RENDER_TEXTURE " + smokeViewport.Width + "x" + smokeViewport.Height);
+
+                ResetBaselineState();
+                yield return Capture(size + "-00-idle.png");
+
+                game.InteractCell(9, 7);
+                yield return Capture(size + "-01-building-selection.png");
+                game.ClearCitySelection();
+                game.NotifyWorldSelection();
+
+                InvokeButton("Button_주거");
+                yield return Capture(size + "-02-build-tray.png");
+                InvokeButton("Button_BuildCollapse");
+
+                InvokeButton("Button_Objectives");
+                yield return Capture(size + "-03-objectives.png");
+                InvokeButton("Button_ObjectivesClose");
+
+                yield return CaptureBaselineModal(size, "04-menu", "Button_Menu", "Button_MenuClose");
+                yield return CaptureBaselineModal(size, "05-overview", "Button_Overview", "Button_OverviewClose");
+                yield return CaptureBaselineModal(size, "06-territory", "Button_Territory", "Button_TerritoryClose");
+                yield return CaptureBaselineModal(size, "07-trade", "Button_Trade", "Button_TradeClose");
+
+                game.Factory.SelectAt(SharedCityScenario.ProcessorMicroX, SharedCityScenario.ProcessorMicroZ);
+                game.NotifyWorldSelection();
+                yield return new WaitForEndOfFrame();
+                InvokeButton("Button_FactoryConfigure");
+                yield return Capture(size + "-08-factory-configure.png");
+                InvokeButton("Button_FactoryConfigureClose");
+                game.Factory.ClearSelection();
+                game.NotifyWorldSelection();
+
+                InvokeButton("Button_기술 연구");
+                yield return Capture(size + "-09-research.png");
+                InvokeButton("Button_ResearchClose");
+                ResetBaselineState();
+            }
+            results.Add("CAPTURES " + baselineCaptureCount + "/40");
+        }
+
+        IEnumerator CaptureBaselineModal(string size, string state, string openButton, string closeButton)
+        {
+            InvokeButton(openButton);
+            yield return Capture(size + "-" + state + ".png");
+            InvokeButton(closeButton);
+        }
+
+        void ResetBaselineState()
+        {
+            if (game.ResearchOpen) game.ToggleResearch();
+            if (game.HelpOpen) game.ToggleHelp();
+            hud.CloseTransientPanels();
+            if (IsActive("Objectives")) InvokeButton("Button_ObjectivesClose");
+            if (IsActive("BuildChoices")) InvokeButton("Button_BuildCollapse");
+            if (game.Factory != null && game.Factory.IsOpen) game.Factory.Close();
+            game.ClearConstructionTools();
+            game.ClearCitySelection();
+            game.NotifyWorldSelection();
+        }
+
+        void InvokeButton(string name)
+        {
+            Button button = FindButton(name);
+            if (button == null) throw new InvalidOperationException("Baseline capture button unavailable: " + name);
+            button.onClick.Invoke();
+            results.Add("BASELINE_ACTION direct Button.onClick " + name);
         }
 
         IEnumerator ExerciseObjectives(string size)
@@ -496,23 +599,49 @@ namespace Riverworks
 
         IEnumerator Capture(string name)
         {
+            yield return new WaitForSecondsRealtime(.3f);
+            if (baselineCaptureOnly && smokeViewport == null)
+            {
+                RecordError("Offscreen baseline viewport is unavailable before capture: " + name);
+                yield break;
+            }
             float deadline = Time.realtimeSinceStartup + 5f;
             string lastReason = "no frame captured";
             while (Time.realtimeSinceStartup < deadline)
             {
-                yield return new WaitForEndOfFrame();
+                if (smokeViewport == null) yield return new WaitForEndOfFrame();
+                else yield return null;
                 Texture2D texture = null;
                 bool captured = false;
+                bool fatalSizeMismatch = false;
                 try
                 {
-                    texture = ScreenCapture.CaptureScreenshotAsTexture();
-                    if (!VisibleFrame(texture, out lastReason)) continue;
-                    File.WriteAllBytes(Path.Combine(output, name), texture.EncodeToPNG());
-                    results.Add("CAPTURE " + name + " " + texture.width + "x" + texture.height);
-                    captured = true;
+                    texture = smokeViewport == null
+                        ? ScreenCapture.CaptureScreenshotAsTexture()
+                        : smokeViewport.Capture();
+                    if (baselineCaptureOnly && (texture == null || texture.width != smokeViewport.Width ||
+                        texture.height != smokeViewport.Height))
+                    {
+                        string actual = texture == null ? "null" : texture.width + "x" + texture.height;
+                        lastReason = "offscreen texture size " + actual + " does not match requested " +
+                            smokeViewport.Width + "x" + smokeViewport.Height;
+                        fatalSizeMismatch = true;
+                    }
+                    else if (VisibleFrame(texture, out lastReason))
+                    {
+                        File.WriteAllBytes(Path.Combine(output, name), texture.EncodeToPNG());
+                        results.Add("CAPTURE " + name + " " + texture.width + "x" + texture.height);
+                        if (baselineCaptureOnly) baselineCaptureCount++;
+                        captured = true;
+                    }
                 }
                 catch (Exception exception) { lastReason = exception.Message; }
                 finally { if (texture != null) Destroy(texture); }
+                if (fatalSizeMismatch)
+                {
+                    RecordError("Capture failed exact-size check: " + name + " - " + lastReason);
+                    yield break;
+                }
                 if (captured) yield break;
             }
             RecordError("Capture failed within five seconds: " + name + " - " + lastReason);
@@ -598,7 +727,11 @@ namespace Riverworks
             if (finished) return;
             finished = true;
             game?.SetSpeed(0);
+            smokeViewport?.Dispose();
+            smokeViewport = null;
             Application.logMessageReceived -= OnLog;
+            if (baselineCaptureOnly && baselineCaptureCount != 40)
+                RecordError("Baseline capture count was " + baselineCaptureCount + ", expected 40");
             int exitCode = errors.Count == 0 && suppressedErrors == 0 ? 0 : 1;
             results.Insert(0, "RUN " + DateTime.UtcNow.ToString("O") + " BUILD " + Application.buildGUID +
                 " BUILDGUID " + Application.buildGUID + " UNITY " + Application.unityVersion);
@@ -606,13 +739,16 @@ namespace Riverworks
             results.Add("SUPPRESSED_ERRORS " + suppressedErrors);
             results.AddRange(errors);
             results.Add("EXIT " + exitCode);
-            try { File.WriteAllLines(Path.Combine(output, "compact-ui-results.txt"), results); }
+            string resultFile = baselineCaptureOnly ? "baseline-capture-results.txt" : "compact-ui-results.txt";
+            try { File.WriteAllLines(Path.Combine(output, resultFile), results); }
             catch (Exception exception)
             {
-                Debug.LogError("Could not write compact-ui-results.txt: " + exception.Message);
+                Debug.LogError("Could not write " + resultFile + ": " + exception.Message);
                 exitCode = 1;
             }
-            Debug.Log(exitCode == 0 ? "COMPACT_UI_RUNTIME_PASS" : "COMPACT_UI_RUNTIME_FAIL");
+            if (baselineCaptureOnly)
+                Debug.Log(exitCode == 0 ? "UI_BASELINE_CAPTURE_DONE" : "UI_BASELINE_CAPTURE_FAIL");
+            else Debug.Log(exitCode == 0 ? "COMPACT_UI_RUNTIME_PASS" : "COMPACT_UI_RUNTIME_FAIL");
             Application.Quit(exitCode);
         }
     }
