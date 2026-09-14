@@ -11,15 +11,15 @@ namespace Riverworks
     public sealed partial class Hud : MonoBehaviour
     {
         // Compact city-builder palette: the world remains the brightest layer.
-        static readonly Color Navy = Hex("101820");
-        static readonly Color Navy2 = Hex("253442");
-        static readonly Color Cream = Hex("DCE6EB");
-        static readonly Color Paper = Hex("1B2731");
-        static readonly Color Coral = Hex("C89B55");
-        static readonly Color Teal = Hex("4A9F98");
-        static readonly Color Gold = Hex("B88A48");
-        static readonly Color Muted = Hex("8FA1AC");
-        static readonly Color Ink = Hex("DCE6EB");
+        static readonly Color Navy = HudStyle.Surface;
+        static readonly Color Navy2 = HudStyle.SurfaceRaised;
+        static readonly Color Cream = HudStyle.Text;
+        static readonly Color Paper = HudStyle.SurfaceRaised;
+        static readonly Color Coral = HudStyle.Accent;
+        static readonly Color Teal = HudStyle.Positive;
+        static readonly Color Gold = HudStyle.Accent;
+        static readonly Color Muted = HudStyle.TextMuted;
+        static readonly Color Ink = HudStyle.Text;
 
         GameController controller;
         FactoryController subscribedFactory;
@@ -48,15 +48,26 @@ namespace Riverworks
         readonly Dictionary<Resource, Button> factoryFeedButtons = new Dictionary<Resource, Button>();
         readonly Dictionary<Resource, Text> factoryFeedLabels = new Dictionary<Resource, Text>();
 
-        Text populationText, eraText, researchSummaryText, objectiveTitle, objectiveBody, objectiveProgress, objectiveChipText;
+        Text populationText, incomeText, eraText, researchSummaryText, objectiveTitle, objectiveBody, objectiveProgress, objectiveChipText;
         Text inspectorTitle, inspectorBody, noticeText, buildInfo, modeText, upgradeLabel, factoryConfigureSummary, overviewBody, feelModeLabel;
-        Button upgradeButton, factoryConfigureButton, factoryRotateButton;
+        Button upgradeButton, factoryConfigureButton, factoryRotateButton, buildCollapseButton, removeButton;
         GameObject objectivePanel, inspectorPanel, buildChoicesPanel, activeToolPanel;
         GameObject helpOverlay, confirmOverlay, researchOverlay, mobileTradeOverlay, factoryConfigureOverlay;
         GameObject menuOverlay, overviewOverlay, territoryOverlay;
         GameObject factoryRecipeSection, factoryFilterSection, factoryFeedSection;
         CanvasGroup noticeGroup;
-        RectTransform buildViewport;
+        RectTransform buildViewport, buildScrollViewport, buildChoicesRect, buildTooltipRect, activeToolRect, inspectorRowsRoot;
+        readonly List<Text> inspectorRowLabels = new List<Text>();
+        readonly List<Text> inspectorRowValues = new List<Text>();
+        readonly Dictionary<Resource, GameObject> resourceChips = new Dictionary<Resource, GameObject>();
+        readonly Dictionary<Resource, bool> stickyResourceVisibility = new Dictionary<Resource, bool>();
+        GameObject buildTooltip;
+        Text buildTooltipText;
+        CanvasScaler canvasScaler;
+        Canvas hudCanvas;
+        GameState observedUiState;
+        Rect currentSafePixels;
+        int appliedUiWidth=-1, appliedUiHeight=-1, appliedUiScale=-1;
         RectTransform researchWindow;
         RectTransform factoryConfigureWindow;
         RectTransform mobileSafeAreaRoot;
@@ -68,6 +79,9 @@ namespace Riverworks
         bool objectiveExpanded, buildTrayOpen, mobileTradeOpen, factoryModalOpen, menuOpen, overviewOpen, territoryOpen, confirmOpen, observedFactoryPaletteOpen;
         Rect appliedSafeArea;
         int appliedScreenWidth=-1, appliedScreenHeight=-1, lastNoticeVersion=-1;
+
+        public bool ConstructionBarVisible => (buildChoicesPanel!=null&&buildChoicesPanel.activeInHierarchy) || (activeToolPanel!=null&&activeToolPanel.activeInHierarchy);
+        public float ConstructionBarHeight => buildChoicesPanel!=null&&buildChoicesPanel.activeInHierarchy ? 72f : activeToolPanel!=null&&activeToolPanel.activeInHierarchy ? 52f : 0f;
 
         public void Initialize(GameController value)
         {
@@ -113,7 +127,7 @@ namespace Riverworks
                 menuOpen=overviewOpen=territoryOpen=mobileTradeOpen=confirmOpen=false;
                 RefreshModalOverlays();
             }
-            if(Application.isMobilePlatform)UpdateMobileSafeArea(false);
+            UpdateDisplayLayout(false);
             if (noticeGroup != null)
             {
                 float target = Time.unscaledTime < noticeVisibleUntil ? 1f : 0f;
@@ -233,13 +247,13 @@ namespace Riverworks
             font = LoadFont();
             rounded = MakeRoundedSprite();
 
-            Canvas canvas = gameObject.GetComponent<Canvas>() ?? gameObject.AddComponent<Canvas>();
+            Canvas canvas = gameObject.GetComponent<Canvas>() ?? gameObject.AddComponent<Canvas>();hudCanvas=canvas;
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 50;
-            CanvasScaler scaler = gameObject.GetComponent<CanvasScaler>() ?? gameObject.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1280, 720);
-            scaler.matchWidthOrHeight = .5f;
+            canvasScaler = gameObject.GetComponent<CanvasScaler>() ?? gameObject.AddComponent<CanvasScaler>();
+            canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+            Vector2 initialPixels=HudStyle.PixelDimensions(canvas);
+            canvasScaler.scaleFactor = HudStyle.IntegerScale(Mathf.RoundToInt(initialPixels.x),Mathf.RoundToInt(initialPixels.y),Screen.dpi,Application.isMobilePlatform);
             if (gameObject.GetComponent<GraphicRaycaster>() == null) gameObject.AddComponent<GraphicRaycaster>();
             if (FindAnyObjectByType<EventSystem>() == null)
             {
@@ -252,67 +266,91 @@ namespace Riverworks
             BuildInspector();
             BuildBottomBar();
             BuildOverlays();
-            if (Application.isMobilePlatform) ApplyMobileSafeArea();
+            ApplyMobileSafeArea();
+            UpdateDisplayLayout(true);
         }
 
         void BuildTopBar()
         {
             GameObject top = Panel("TopBar", transform, new Color(Navy.r,Navy.g,Navy.b,.98f), new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -52), Vector2.zero);
+            GameObject resourceViewport=new GameObject("ResourceViewport",typeof(RectTransform),typeof(RectMask2D),typeof(ScrollRect));
+            resourceViewport.transform.SetParent(top.transform,false);
+            Rect(resourceViewport,new Vector2(0,0),new Vector2(1,1),new Vector2(8,4),new Vector2(-216,-4));
+            GameObject resourceContent=new GameObject("ResourceContent",typeof(RectTransform),typeof(HorizontalLayoutGroup),typeof(ContentSizeFitter));
+            resourceContent.transform.SetParent(resourceViewport.transform,false);
+            RectTransform resourceContentRect=resourceContent.GetComponent<RectTransform>();
+            resourceContentRect.anchorMin=new Vector2(0,0);resourceContentRect.anchorMax=new Vector2(0,1);resourceContentRect.pivot=new Vector2(0,.5f);resourceContentRect.anchoredPosition=Vector2.zero;resourceContentRect.sizeDelta=Vector2.zero;
+            HorizontalLayoutGroup resourceLayout=resourceContent.GetComponent<HorizontalLayoutGroup>();resourceLayout.spacing=4;resourceLayout.childForceExpandWidth=false;resourceLayout.childForceExpandHeight=true;
+            ContentSizeFitter resourceFitter=resourceContent.GetComponent<ContentSizeFitter>();resourceFitter.horizontalFit=ContentSizeFitter.FitMode.PreferredSize;
+            ScrollRect resourceScroll=resourceViewport.GetComponent<ScrollRect>();resourceScroll.viewport=resourceViewport.GetComponent<RectTransform>();resourceScroll.content=resourceContentRect;resourceScroll.horizontal=true;resourceScroll.vertical=false;resourceScroll.movementType=ScrollRect.MovementType.Clamped;
             Resource[] shown = { Resource.Coins, Resource.Timber, Resource.Stone, Resource.Grain, Resource.Flour, Resource.Bread, Resource.Ore, Resource.Steel, Resource.Tools };
-            float x = 8;
             foreach (Resource res in shown)
             {
                 float width=res==Resource.Coins?82:68;
-                GameObject chip = Box(res.ToString(), top.transform, new Vector2(x,-5), new Vector2(width,42), new Color(Navy2.r,Navy2.g,Navy2.b,.86f));
-                Text t = Label("", chip.transform, 12, Cream, FontStyle.Bold, TextAnchor.MiddleCenter);
+                GameObject chip = Box(res.ToString(), resourceContent.transform, Vector2.zero, new Vector2(width,42), new Color(Navy2.r,Navy2.g,Navy2.b,.86f),Vector2.zero);
+                LayoutElement chipLayout=chip.AddComponent<LayoutElement>();chipLayout.preferredWidth=width;chipLayout.preferredHeight=42;
+                Text t = Label("", chip.transform, HudStyle.BodySize, Cream, FontStyle.Normal, TextAnchor.MiddleCenter);
                 Rect(t.gameObject, Vector2.zero, Vector2.one, new Vector2(3, 2), new Vector2(-3, -2));
                 resourceTexts[res] = t;
+                resourceChips[res] = chip;
                 FeelUiFeedback.AttachResource(t,res==Resource.Coins?Gold:Teal);
-                x += width+4;
             }
-            populationText = Label("", top.transform, 12, Cream, FontStyle.Bold, TextAnchor.MiddleCenter);
-            Rect(populationText.gameObject,new Vector2(1,1),new Vector2(1,1),new Vector2(-302,-26),new Vector2(250,42));
+            GameObject populationChip=Box("Population",resourceContent.transform,Vector2.zero,new Vector2(232,42),new Color(Navy2.r,Navy2.g,Navy2.b,.86f),Vector2.zero);
+            LayoutElement populationLayout=populationChip.AddComponent<LayoutElement>();populationLayout.preferredWidth=232;populationLayout.preferredHeight=42;
+            populationText = Label("", populationChip.transform, HudStyle.BodySize, Cream, FontStyle.Normal, TextAnchor.MiddleCenter);
+            Rect(populationText.gameObject,Vector2.zero,new Vector2(.58f,1),new Vector2(4,1),new Vector2(-2,-1));
+            incomeText=Label("",populationChip.transform,HudStyle.BodySize,Cream,FontStyle.Normal,TextAnchor.MiddleCenter);
+            Rect(incomeText.gameObject,new Vector2(.58f,0),Vector2.one,new Vector2(2,1),new Vector2(-4,-1));
 
-            Button research = MakeButton("기술 연구", top.transform, new Vector2(-8,-4), new Vector2(164,44), Gold, () => controller.ToggleResearch(), new Vector2(1,1), 12);
+            Button research = MakeButton("기술 연구", top.transform, new Vector2(-8,-4), new Vector2(200,HudStyle.TouchSize), Navy2, () => controller.ToggleResearch(), new Vector2(1,1), HudStyle.BodySize);
             research.name="Button_기술 연구";
             AddButtonIcon(research,"info");
             eraText = research.GetComponentInChildren<Text>();
-            Rect(eraText.gameObject,new Vector2(0,.42f),Vector2.one,new Vector2(25,0),new Vector2(-3,-1));
-            researchSummaryText = Label("", research.transform, 10, Cream, FontStyle.Bold, TextAnchor.MiddleCenter);
-            Rect(researchSummaryText.gameObject,Vector2.zero,new Vector2(1,.42f),new Vector2(25,1),new Vector2(-3,0));
+            Rect(eraText.gameObject,new Vector2(0,.5f),Vector2.one,new Vector2(25,1),new Vector2(-3,-1));
+            researchSummaryText = Label("", research.transform, HudStyle.BodySize, Cream, FontStyle.Normal, TextAnchor.MiddleCenter);
+            Rect(researchSummaryText.gameObject,Vector2.zero,new Vector2(1,.5f),new Vector2(25,1),new Vector2(-3,-1));
         }
 
         void BuildObjective()
         {
-            Button chip=MakeButton("현재 목표",transform,new Vector2(8,-60),new Vector2(250,44),new Color(Navy.r,Navy.g,Navy.b,.97f),ToggleObjectives,new Vector2(0,1),12);
+            Button chip=MakeButton("현재 목표",transform,new Vector2(8,-60),new Vector2(250,44),new Color(Navy.r,Navy.g,Navy.b,.97f),ToggleObjectives,new Vector2(0,1),HudStyle.BodySize);
             chip.name="Button_Objectives";
             objectiveChipText=chip.GetComponentInChildren<Text>();
             objectiveChipText.alignment=TextAnchor.MiddleLeft;
             Rect(objectiveChipText.gameObject,Vector2.zero,Vector2.one,new Vector2(12,2),new Vector2(-26,-2));
-            LabelAt("›",chip.transform,18,Coral,FontStyle.Bold,new Vector2(224,-10),new Vector2(18,24)).alignment=TextAnchor.MiddleCenter;
+            LabelAt("›",chip.transform,HudStyle.TitleSize,Muted,FontStyle.Normal,new Vector2(224,-10),new Vector2(18,24)).alignment=TextAnchor.MiddleCenter;
 
             objectivePanel = Box("Objectives", transform, new Vector2(8, -110), new Vector2(276, 160), new Color(Paper.r,Paper.g,Paper.b,.98f), new Vector2(0,1));
-            LabelAt("현재 목표", objectivePanel.transform, 11, Coral, FontStyle.Bold, new Vector2(14,-10), new Vector2(200,18));
-            Button close=MakeButton("닫기",objectivePanel.transform,new Vector2(210,-4),new Vector2(58,44),Navy2,()=>SetObjectives(false),new Vector2(0,1),11);
+            Button close=MakeButton("",objectivePanel.transform,new Vector2(-8,-4),new Vector2(44,44),Navy,()=>SetObjectives(false),new Vector2(1,1),11);
             close.name="Button_ObjectivesClose";
-            objectiveTitle = LabelAt("", objectivePanel.transform, 16, Cream, FontStyle.Bold, new Vector2(14,-34), new Vector2(244,24));
-            objectiveBody = LabelAt("", objectivePanel.transform, 12, Ink, FontStyle.Normal, new Vector2(14,-62), new Vector2(248,50));
-            objectiveProgress = LabelAt("", objectivePanel.transform, 12, Teal, FontStyle.Bold, new Vector2(14,-120), new Vector2(248,22));
+            AddCenteredModalIcon(close,HudAssets.CloseIcon);
+            objectiveTitle = LabelAt("", objectivePanel.transform, HudStyle.TitleSize, Cream, FontStyle.Normal, new Vector2(14,-10), new Vector2(190,30));
+            objectiveBody = LabelAt("", objectivePanel.transform, HudStyle.BodySize, Ink, FontStyle.Normal, new Vector2(14,-48), new Vector2(248,58));
+            objectiveProgress = LabelAt("", objectivePanel.transform, HudStyle.BodySize, Teal, FontStyle.Normal, new Vector2(14,-116), new Vector2(248,22));
             FeelUiFeedback.AttachPanel(objectivePanel);
             objectivePanel.SetActive(false);
         }
 
         void BuildInspector()
         {
-            inspectorPanel = Box("Inspector", transform, new Vector2(-8,-60), new Vector2(276,230), new Color(Paper.r,Paper.g,Paper.b,.98f), new Vector2(1,1));
-            inspectorTitle = LabelAt("선택 정보", inspectorPanel.transform, 16, Cream, FontStyle.Bold, new Vector2(14,-11), new Vector2(210,26));
-            Button close=MakeButton("닫기",inspectorPanel.transform,new Vector2(-8,-4),new Vector2(58,44),Navy2,CloseInspector,new Vector2(1,1),11);
+            inspectorPanel = Box("Inspector", transform, new Vector2(-8,-60), new Vector2(292,214), new Color(Paper.r,Paper.g,Paper.b,.98f), new Vector2(1,1));
+            inspectorTitle = LabelAt("선택 정보", inspectorPanel.transform, HudStyle.TitleSize, Cream, FontStyle.Normal, new Vector2(14,-8), new Vector2(214,30));
+            Button close=MakeButton("",inspectorPanel.transform,new Vector2(-8,-4),new Vector2(44,44),Navy,CloseInspector,new Vector2(1,1),11);
             close.name="Button_InspectorClose";
-            inspectorBody = LabelAt("", inspectorPanel.transform, 12, Ink, FontStyle.Normal, new Vector2(14,-43), new Vector2(248,136));
-            inspectorBody.alignment = TextAnchor.UpperLeft;
-            upgradeButton=MakeButton("선택 건물 업그레이드", inspectorPanel.transform, new Vector2(14,-178), new Vector2(248,44), Teal, () => controller.UpgradeSelected(), new Vector2(0,1),11);
+            AddCenteredModalIcon(close,HudAssets.CloseIcon);
+            GameObject rowsViewport=new GameObject("InspectorRowsViewport",typeof(RectTransform),typeof(RectMask2D),typeof(ScrollRect));rowsViewport.transform.SetParent(inspectorPanel.transform,false);
+            Rect(rowsViewport,new Vector2(0,1),new Vector2(1,1),new Vector2(14,-158),new Vector2(-14,-42));
+            GameObject rows=new GameObject("InspectorRows",typeof(RectTransform),typeof(VerticalLayoutGroup),typeof(ContentSizeFitter));rows.transform.SetParent(rowsViewport.transform,false);
+            inspectorRowsRoot=rows.GetComponent<RectTransform>();inspectorRowsRoot.anchorMin=new Vector2(0,1);inspectorRowsRoot.anchorMax=new Vector2(1,1);inspectorRowsRoot.pivot=new Vector2(.5f,1);inspectorRowsRoot.anchoredPosition=Vector2.zero;inspectorRowsRoot.sizeDelta=Vector2.zero;
+            VerticalLayoutGroup rowsLayout=rows.GetComponent<VerticalLayoutGroup>();rowsLayout.spacing=2;rowsLayout.childForceExpandHeight=false;rowsLayout.childForceExpandWidth=true;
+            rows.GetComponent<ContentSizeFitter>().verticalFit=ContentSizeFitter.FitMode.PreferredSize;
+            ScrollRect rowsScroll=rowsViewport.GetComponent<ScrollRect>();rowsScroll.viewport=rowsViewport.GetComponent<RectTransform>();rowsScroll.content=inspectorRowsRoot;rowsScroll.horizontal=false;rowsScroll.vertical=true;rowsScroll.movementType=ScrollRect.MovementType.Clamped;
+            for(int i=0;i<7;i++)CreateInspectorRow(rows.transform);
+            inspectorBody = LabelAt("", inspectorPanel.transform, HudStyle.BodySize, Ink, FontStyle.Normal, new Vector2(14,-42), new Vector2(264,116));
+            inspectorBody.gameObject.SetActive(false);
+            upgradeButton=MakeButton("선택 건물 업그레이드", inspectorPanel.transform, new Vector2(14,-164), new Vector2(264,44), Navy2, () => controller.UpgradeSelected(), new Vector2(0,1),11);
             upgradeLabel=upgradeButton.GetComponentInChildren<Text>();
-            factoryConfigureButton=MakeButton("설비 구성",inspectorPanel.transform,new Vector2(14,-178),new Vector2(248,44),Teal,()=>SetFactoryModal(true),new Vector2(0,1),11);
+            factoryConfigureButton=MakeButton("설비 구성",inspectorPanel.transform,new Vector2(14,-164),new Vector2(264,44),Navy2,()=>SetFactoryModal(true),new Vector2(0,1),11);
             factoryConfigureButton.name="Button_FactoryConfigure";
             factoryConfigureButton.gameObject.SetActive(false);
             FeelUiFeedback.AttachPanel(inspectorPanel);
@@ -322,66 +360,141 @@ namespace Riverworks
         void BuildBottomBar()
         {
             GameObject bottom = Panel("BuildBar", transform, new Color(Navy.r,Navy.g,Navy.b,.98f), new Vector2(0,0), new Vector2(1,0), new Vector2(8,8), new Vector2(-8,60));
+            GameObject groupViewport=new GameObject("BottomGroupsViewport",typeof(RectTransform),typeof(RectMask2D),typeof(ScrollRect));groupViewport.transform.SetParent(bottom.transform,false);
+            Rect(groupViewport,Vector2.zero,Vector2.one,new Vector2(6,4),new Vector2(-88,-4));
+            GameObject groups=new GameObject("BottomGroups",typeof(RectTransform),typeof(HorizontalLayoutGroup),typeof(ContentSizeFitter));groups.transform.SetParent(groupViewport.transform,false);
+            RectTransform groupsRect=groups.GetComponent<RectTransform>();groupsRect.anchorMin=new Vector2(0,0);groupsRect.anchorMax=new Vector2(0,1);groupsRect.pivot=new Vector2(0,.5f);groupsRect.anchoredPosition=Vector2.zero;groupsRect.sizeDelta=Vector2.zero;
+            HorizontalLayoutGroup groupsLayout=groups.GetComponent<HorizontalLayoutGroup>();groupsLayout.spacing=4;groupsLayout.childForceExpandWidth=false;groupsLayout.childForceExpandHeight=true;
+            ContentSizeFitter groupsFitter=groups.GetComponent<ContentSizeFitter>();groupsFitter.horizontalFit=ContentSizeFitter.FitMode.PreferredSize;
+            ScrollRect groupScroll=groupViewport.GetComponent<ScrollRect>();groupScroll.viewport=groupViewport.GetComponent<RectTransform>();groupScroll.content=groupsRect;groupScroll.horizontal=true;groupScroll.vertical=false;groupScroll.movementType=ScrollRect.MovementType.Clamped;
             string[] cats = { "주거", "생산", "산업", "도시", "설비", "물류" };
             for (int i=0;i<cats.Length;i++)
             {
                 string c=cats[i];
                 string label=c=="설비"?"설비 G":c;
-                Button tab=MakeButton(label,bottom.transform,new Vector2(6+i*66,-4),new Vector2(62,44),c==category?Coral:Navy2,()=>SelectCategory(c),new Vector2(0,1),12);
+                Button tab=MakeLayoutButton(label,groups.transform,50,c==category?Coral:Navy2,()=>SelectCategory(c));
                 tab.name=c=="설비"?"Button_Factory":"Button_"+c;
                 categoryButtons[c]=tab;
             }
-            Button collapse=MakeButton("도구  ▴",bottom.transform,new Vector2(406,-4),new Vector2(86,44),Navy2,ToggleBuildTray,new Vector2(0,1),11);
+            Button collapse=MakeLayoutButton("목록 ▴",groups.transform,66,Navy2,ToggleBuildTray);buildCollapseButton=collapse;
             collapse.name="Button_BuildCollapse";
-            Button remove=MakeButton("철거",bottom.transform,new Vector2(498,-4),new Vector2(66,44),new Color(.55f,.28f,.25f,1),SelectRemoveTool,new Vector2(0,1),12);
+            Button remove=MakeLayoutButton("철거",groups.transform,50,Navy2,SelectRemoveTool);removeButton=remove;
             remove.name="Button_철거";
             Button menu=MakeButton("메뉴",bottom.transform,new Vector2(-6,-4),new Vector2(76,44),Navy2,OpenMenu,new Vector2(1,1),12);
             menu.name="Button_Menu";AddButtonIcon(menu,"menu");
 
-            buildChoicesPanel=Panel("BuildChoices",transform,new Color(Navy.r,Navy.g,Navy.b,.98f),new Vector2(0,0),new Vector2(1,0),new Vector2(8,68),new Vector2(-8,140));
-            GameObject viewport = new GameObject("BuildChoiceViewport", typeof(RectTransform),typeof(RectMask2D));
-            viewport.transform.SetParent(buildChoicesPanel.transform,false); Rect(viewport,new Vector2(0,0),new Vector2(1,1),new Vector2(10,8),new Vector2(-300,-8));
-            buildViewport=viewport.GetComponent<RectTransform>();
-            HorizontalLayoutGroup layout=viewport.AddComponent<HorizontalLayoutGroup>(); layout.spacing=6; layout.padding=new RectOffset(0,0,0,0);layout.childForceExpandWidth=false; layout.childForceExpandHeight=true;
+            AddDivider(groups.transform);
+            float[] speeds={0,1,3}; string[] names={"Ⅱ","1×","3×"};
+            for(int i=0;i<3;i++)
+            {
+                float speed=speeds[i];Button b=MakeLayoutButton(names[i],groups.transform,44,Navy2,()=>controller.SetSpeed(speed));
+                b.name="Button_"+names[i];speedButtons.Add(b);ConfigureSpeedButton(b,i);
+            }
+            AddDivider(groups.transform);
+            Button overview=MakeLayoutButton("현황",groups.transform,52,Navy2,()=>OpenUtility("overview"));overview.name="Button_Overview";
+            Button territory=MakeLayoutButton("영토",groups.transform,52,Navy2,()=>OpenUtility("territory"));territory.name="Button_Territory";
+            Button trade=MakeLayoutButton("교역",groups.transform,52,Navy2,()=>OpenUtility("trade"));trade.name="Button_Trade";
+
+            buildChoicesPanel=Box("BuildChoices",transform,new Vector2(8,68),new Vector2(600,72),new Color(Navy.r,Navy.g,Navy.b,.98f),new Vector2(0,0));
+            buildChoicesRect=buildChoicesPanel.GetComponent<RectTransform>();
+            GameObject viewport = new GameObject("BuildChoiceViewport", typeof(RectTransform),typeof(RectMask2D),typeof(ScrollRect));
+            viewport.transform.SetParent(buildChoicesPanel.transform,false); Rect(viewport,Vector2.zero,Vector2.one,new Vector2(10,8),new Vector2(-10,-8));
+            buildScrollViewport=viewport.GetComponent<RectTransform>();
+            GameObject content=new GameObject("BuildChoiceContent",typeof(RectTransform),typeof(HorizontalLayoutGroup),typeof(ContentSizeFitter));content.transform.SetParent(viewport.transform,false);
+            buildViewport=content.GetComponent<RectTransform>();buildViewport.anchorMin=new Vector2(0,0);buildViewport.anchorMax=new Vector2(0,1);buildViewport.pivot=new Vector2(0,.5f);buildViewport.anchoredPosition=Vector2.zero;buildViewport.sizeDelta=Vector2.zero;
+            HorizontalLayoutGroup layout=content.GetComponent<HorizontalLayoutGroup>();layout.spacing=6;layout.childForceExpandWidth=false;layout.childForceExpandHeight=true;
+            ContentSizeFitter contentFitter=content.GetComponent<ContentSizeFitter>();contentFitter.horizontalFit=ContentSizeFitter.FitMode.PreferredSize;
+            ScrollRect buildScroll=viewport.GetComponent<ScrollRect>();buildScroll.viewport=buildScrollViewport;buildScroll.content=buildViewport;buildScroll.horizontal=true;buildScroll.vertical=false;buildScroll.movementType=ScrollRect.MovementType.Clamped;
             foreach (BuildingSpec spec in Catalog.All)
             {
                 if (spec.Kind == BuildingKind.None || spec.Kind == BuildingKind.TownHall) continue;
-                Button b=MakeButton(spec.Name,viewport.transform,Vector2.zero,new Vector2(96,56),Navy2,()=>SelectCityTool(spec.Kind),Vector2.zero,11);
+                Button b=MakeButton(spec.Name,content.transform,Vector2.zero,new Vector2(96,56),Navy2,()=>SelectCityTool(spec.Kind),Vector2.zero,11);
                 LayoutElement le=b.gameObject.AddComponent<LayoutElement>(); le.preferredWidth=96; le.preferredHeight=56;
                 buildButtons[spec.Kind]=b; buildLabels[spec.Kind]=b.GetComponentInChildren<Text>();
-                AddHover(b.gameObject,()=>{hoveredKind=spec.Kind;RefreshBuildInfo();},()=>{hoveredKind=BuildingKind.None;RefreshBuildInfo();});
+                AttachBuildTooltip(b,spec.Description);
             }
             foreach (FactorySpec spec in FactoryCatalog.All)
             {
                 if(spec==null || spec.Kind==FactoryKind.None)continue;
                 FactoryKind kind=spec.Kind;
-                Button b=MakeButton(spec.Name,viewport.transform,Vector2.zero,new Vector2(104,56),Navy2,()=>SelectFactoryTool(kind),Vector2.zero,11);
+                Button b=MakeButton(spec.Name,content.transform,Vector2.zero,new Vector2(104,56),Navy2,()=>SelectFactoryTool(kind),Vector2.zero,11);
                 LayoutElement le=b.gameObject.AddComponent<LayoutElement>();le.preferredWidth=104;le.preferredHeight=56;
                 factoryButtons[kind]=b;factoryLabels[kind]=b.GetComponentInChildren<Text>();
-                AddHover(b.gameObject,()=>{hoveredFactoryKind=kind;RefreshBuildInfo();},()=>{hoveredFactoryKind=FactoryKind.None;RefreshBuildInfo();});
+                AttachBuildTooltip(b,spec.Description);
             }
-            buildInfo = Label("", buildChoicesPanel.transform, 11, Cream, FontStyle.Normal, TextAnchor.UpperLeft);
-            Rect(buildInfo.gameObject,new Vector2(1,0),new Vector2(1,1),new Vector2(-286,8),new Vector2(-10,-8));
-            buildInfo.alignment=TextAnchor.UpperLeft;
+            buildInfo = Label("", buildChoicesPanel.transform, HudStyle.BodySize, Cream, FontStyle.Normal, TextAnchor.UpperLeft);buildInfo.gameObject.SetActive(false);
+            buildTooltip=Box("BuildTooltip",transform,new Vector2(8,148),new Vector2(360,58),new Color(Paper.r,Paper.g,Paper.b,.99f),new Vector2(0,0));
+            buildTooltipRect=buildTooltip.GetComponent<RectTransform>();buildTooltipText=Label("",buildTooltip.transform,HudStyle.BodySize,Cream,FontStyle.Normal,TextAnchor.MiddleLeft);Rect(buildTooltipText.gameObject,Vector2.zero,Vector2.one,new Vector2(10,6),new Vector2(-10,-6));buildTooltip.SetActive(false);
 
             activeToolPanel=Box("ActiveTool",transform,new Vector2(0,68),new Vector2(460,52),new Color(Navy.r,Navy.g,Navy.b,.98f),new Vector2(.5f,0));
-            modeText=LabelAt("",activeToolPanel.transform,12,Cream,FontStyle.Bold,new Vector2(12,-7),new Vector2(230,36));
+            activeToolRect=activeToolPanel.GetComponent<RectTransform>();
+            GameObject activeViewport=new GameObject("ActiveToolViewport",typeof(RectTransform),typeof(RectMask2D),typeof(ScrollRect));activeViewport.transform.SetParent(activeToolPanel.transform,false);Rect(activeViewport,Vector2.zero,Vector2.one,new Vector2(4,4),new Vector2(-4,-4));
+            GameObject activeContent=new GameObject("ActiveToolContent",typeof(RectTransform));activeContent.transform.SetParent(activeViewport.transform,false);RectTransform activeContentRect=activeContent.GetComponent<RectTransform>();activeContentRect.anchorMin=new Vector2(0,0);activeContentRect.anchorMax=new Vector2(0,1);activeContentRect.pivot=new Vector2(0,.5f);activeContentRect.anchoredPosition=Vector2.zero;activeContentRect.sizeDelta=new Vector2(452,0);
+            ScrollRect activeScroll=activeViewport.GetComponent<ScrollRect>();activeScroll.viewport=activeViewport.GetComponent<RectTransform>();activeScroll.content=activeContentRect;activeScroll.horizontal=true;activeScroll.vertical=false;activeScroll.movementType=ScrollRect.MovementType.Clamped;
+            modeText=LabelAt("",activeContent.transform,HudStyle.BodySize,Cream,FontStyle.Normal,new Vector2(8,-0),new Vector2(230,42));
             modeText.alignment=TextAnchor.MiddleLeft;
-            Button cancel=MakeButton("취소",activeToolPanel.transform,new Vector2(250,-4),new Vector2(86,44),Navy2,CancelTool,new Vector2(0,1),12);
+            Button cancel=MakeButton("취소",activeContent.transform,new Vector2(242,0),new Vector2(86,44),Navy2,CancelTool,new Vector2(0,1),12);
             cancel.name="Button_ToolCancel";
-            factoryRotateButton=MakeButton("회전  R",activeToolPanel.transform,new Vector2(342,-4),new Vector2(106,44),Gold,RotateFactoryTool,new Vector2(0,1),11);
+            factoryRotateButton=MakeButton("회전  R",activeContent.transform,new Vector2(334,0),new Vector2(106,44),Navy2,RotateFactoryTool,new Vector2(0,1),11);
             factoryRotateButton.name="Button_FactoryRotate";AddButtonIcon(factoryRotateButton,"rotate");
-
-            float[] speeds={0,1,3}; string[] names={"Ⅱ","1×","3×"};
-            for(int i=0;i<3;i++){float s=speeds[i];Button b=MakeButton(names[i],bottom.transform,new Vector2(570+i*48,-4),new Vector2(44,44),Navy2,()=>controller.SetSpeed(s),new Vector2(0,1),11);speedButtons.Add(b);}
-            Button overview=MakeButton("현황",bottom.transform,new Vector2(730,-4),new Vector2(72,44),Navy2,()=>OpenUtility("overview"),new Vector2(0,1),11);overview.name="Button_Overview";
-            Button territory=MakeButton("영토",bottom.transform,new Vector2(808,-4),new Vector2(72,44),Navy2,()=>OpenUtility("territory"),new Vector2(0,1),11);territory.name="Button_Territory";
-            Button trade=MakeButton("교역",bottom.transform,new Vector2(886,-4),new Vector2(72,44),Teal,()=>OpenUtility("trade"),new Vector2(0,1),11);trade.name="Button_Trade";
             FeelUiFeedback.AttachPanel(buildChoicesPanel);
             FeelUiFeedback.AttachPanel(activeToolPanel);
             buildChoicesPanel.SetActive(false);
             activeToolPanel.SetActive(false);
         }
+
+        Button MakeLayoutButton(string value,Transform parent,float width,Color color,UnityEngine.Events.UnityAction click)
+        {
+            Button button=MakeButton(value,parent,Vector2.zero,new Vector2(width,HudStyle.TouchSize),color,click,Vector2.zero,HudStyle.BodySize);
+            LayoutElement layout=button.gameObject.AddComponent<LayoutElement>();layout.preferredWidth=width;layout.preferredHeight=HudStyle.TouchSize;
+            return button;
+        }
+
+        void AddDivider(Transform parent)
+        {
+            GameObject divider=new GameObject("Divider",typeof(RectTransform),typeof(Image),typeof(LayoutElement));divider.transform.SetParent(parent,false);
+            LayoutElement layout=divider.GetComponent<LayoutElement>();layout.preferredWidth=6;layout.preferredHeight=HudStyle.TouchSize;
+            Image image=divider.GetComponent<Image>();image.sprite=HudAssets.Divider;image.color=HudStyle.TextMuted;image.preserveAspect=true;image.raycastTarget=false;
+        }
+
+        void ConfigureSpeedButton(Button button,int index)
+        {
+            Text label=button.GetComponentInChildren<Text>();if(label!=null)label.gameObject.SetActive(false);
+            string iconName=index==0?HudAssets.PauseIcon:HudAssets.PlayIcon;
+            Sprite sprite=HudAssets.Icon(iconName);if(sprite==null)return;
+            int iconCount=index==2?2:1;
+            for(int i=0;i<iconCount;i++)
+            {
+                GameObject icon=new GameObject("Icon_"+iconName+"_"+i,typeof(RectTransform),typeof(Image));icon.transform.SetParent(button.transform,false);
+                float x=iconCount==1?0:(i==0?-7:7);Rect(icon,new Vector2(.5f,.5f),new Vector2(.5f,.5f),new Vector2(x,0),new Vector2(16,16));
+                Image image=icon.GetComponent<Image>();image.sprite=sprite;image.color=HudStyle.Foreground(button.targetGraphic.color);image.preserveAspect=true;image.raycastTarget=false;
+            }
+        }
+
+        void AttachBuildTooltip(Button button,string initialText)
+        {
+            HudTooltipTrigger trigger=button.gameObject.AddComponent<HudTooltipTrigger>();trigger.TooltipText=initialText;trigger.Show=ShowBuildTooltip;trigger.Hide=HideBuildTooltip;
+        }
+
+        static void SetBuildTooltip(Button button,string text)
+        {
+            HudTooltipTrigger trigger=button==null?null:button.GetComponent<HudTooltipTrigger>();if(trigger!=null)trigger.TooltipText=text;
+        }
+
+        void ShowBuildTooltip(RectTransform source,string text)
+        {
+            if(buildTooltip==null||buildTooltipText==null)return;buildTooltipText.text=text;buildTooltip.SetActive(true);
+            Canvas.ForceUpdateCanvases();
+            Vector3[] corners=new Vector3[4];source.GetWorldCorners(corners);Vector3 local=((RectTransform)transform).InverseTransformPoint(corners[1]);
+            float scale=Mathf.Max(1,appliedUiScale);float logicalWidth=currentSafePixels.width/scale;
+            float logicalHeight=currentSafePixels.height/scale;
+            float tooltipHeight=Mathf.Max(58,buildTooltipText.preferredHeight+16);
+            buildTooltipRect.sizeDelta=new Vector2(buildTooltipRect.sizeDelta.x,tooltipHeight);
+            float bottom=Mathf.Clamp(148,8,Mathf.Max(8,logicalHeight-tooltipHeight-8));
+            buildTooltipRect.pivot=new Vector2(0,0);buildTooltipRect.anchoredPosition=new Vector2(Mathf.Clamp(local.x,8,Mathf.Max(8,logicalWidth-buildTooltipRect.rect.width-8)),bottom);
+        }
+
+        void HideBuildTooltip(){if(buildTooltip!=null)buildTooltip.SetActive(false);}
 
         void ApplyMobileSafeArea()
         {
@@ -394,15 +507,44 @@ namespace Riverworks
 
         void UpdateMobileSafeArea(bool force)
         {
-            if(mobileSafeAreaRoot==null || Screen.width<=0 || Screen.height<=0)return;
-            Rect safe=Screen.safeArea;
-            if(!force && appliedScreenWidth==Screen.width && appliedScreenHeight==Screen.height && appliedSafeArea==safe)return;
-            mobileSafeAreaRoot.anchorMin=new Vector2(safe.xMin/Screen.width,safe.yMin/Screen.height);
-            mobileSafeAreaRoot.anchorMax=new Vector2(safe.xMax/Screen.width,safe.yMax/Screen.height);
+            Vector2 pixels=HudStyle.PixelDimensions(hudCanvas);int pixelWidth=Mathf.RoundToInt(pixels.x),pixelHeight=Mathf.RoundToInt(pixels.y);
+            if(mobileSafeAreaRoot==null || pixelWidth<=0 || pixelHeight<=0)return;
+            bool virtualFrame=hudCanvas!=null&&hudCanvas.worldCamera!=null&&hudCanvas.worldCamera.targetTexture!=null;
+            Rect safe=virtualFrame?new Rect(0,0,pixelWidth,pixelHeight):Screen.safeArea;
+            if(!force && appliedScreenWidth==pixelWidth && appliedScreenHeight==pixelHeight && appliedSafeArea==safe)return;
+            mobileSafeAreaRoot.anchorMin=new Vector2(safe.xMin/pixelWidth,safe.yMin/pixelHeight);
+            mobileSafeAreaRoot.anchorMax=new Vector2(safe.xMax/pixelWidth,safe.yMax/pixelHeight);
             mobileSafeAreaRoot.offsetMin=mobileSafeAreaRoot.offsetMax=Vector2.zero;
             appliedSafeArea=safe;
-            appliedScreenWidth=Screen.width;
-            appliedScreenHeight=Screen.height;
+            currentSafePixels=safe;
+            appliedScreenWidth=pixelWidth;
+            appliedScreenHeight=pixelHeight;
+        }
+
+        void UpdateDisplayLayout(bool force)
+        {
+            Vector2 pixels=HudStyle.PixelDimensions(hudCanvas);int pixelWidth=Mathf.RoundToInt(pixels.x),pixelHeight=Mathf.RoundToInt(pixels.y);
+            if(pixelWidth<=0||pixelHeight<=0)return;
+            Rect previousSafe=currentSafePixels;UpdateMobileSafeArea(false);bool safeChanged=previousSafe!=currentSafePixels;
+            int scale=HudStyle.IntegerScale(pixelWidth,pixelHeight,Screen.dpi,Application.isMobilePlatform);
+            if(!force&&!safeChanged&&appliedUiWidth==pixelWidth&&appliedUiHeight==pixelHeight&&appliedUiScale==scale)return;
+            if(canvasScaler!=null)canvasScaler.scaleFactor=scale;
+            UpdateMobileSafeArea(true);
+            appliedUiWidth=pixelWidth;appliedUiHeight=pixelHeight;appliedUiScale=scale;
+            ResizeConstructionPanels();
+            RefreshModalLayouts();
+        }
+
+        void ResizeConstructionPanels()
+        {
+            if(buildChoicesRect==null)return;
+            float logicalWidth=Mathf.Max(1,currentSafePixels.width/Mathf.Max(1,appliedUiScale));
+            float contentWidth=20;
+            foreach(var pair in buildButtons)if(pair.Value!=null&&pair.Value.gameObject.activeSelf)contentWidth+=102;
+            foreach(var pair in factoryButtons)if(pair.Value!=null&&pair.Value.gameObject.activeSelf)contentWidth+=110;
+            buildChoicesRect.sizeDelta=new Vector2(Mathf.Clamp(contentWidth,116,Mathf.Max(116,logicalWidth-16)),72);
+            if(activeToolRect!=null)activeToolRect.sizeDelta=new Vector2(Mathf.Clamp(logicalWidth-16,116,460),52);
+            if(buildTooltipRect!=null)buildTooltipRect.sizeDelta=new Vector2(Mathf.Min(420,Mathf.Max(220,logicalWidth-16)),58);
         }
 
         void Refresh()
@@ -416,6 +558,7 @@ namespace Riverworks
                 else if(IsFactoryCategory(category))category=lastCityCategory;
             }
             Simulation sim=controller.Sim; GameState s=controller.State;
+            RefreshAdvancedResourceVisibility(sim,s);
             foreach(var pair in resourceTexts)
             {
                 float amount=Mathf.Floor(pair.Key==Resource.Coins?s.Coins:sim.Get(pair.Key));
@@ -427,7 +570,9 @@ namespace Riverworks
                 displayedResourceValues[pair.Key]=amount;
             }
             string income=sim.LastIncome>=0?"+"+sim.LastIncome.ToString("0.0"):sim.LastIncome.ToString("0.0");
-            populationText.text="주민 "+s.Population+" · 행복 "+s.Happiness+"%\n"+s.Day+"일 · 수입 "+income+"G";
+            populationText.text="주민 "+s.Population+" · 행복 "+s.Happiness+"%\n"+s.Day+"일";
+            incomeText.text="수입\n"+income+"G";
+            incomeText.color=sim.LastIncome<0?HudStyle.Danger:HudStyle.Text;
             RefreshResearch();
             objectiveTitle.text=sim.ObjectiveTitle ?? "도시를 성장시키세요";
             objectiveBody.text=sim.ObjectiveDescription ?? "생산망과 주거지를 연결하세요.";
@@ -438,7 +583,14 @@ namespace Riverworks
             RefreshFeelModeLabel();
             for(int i=0;i<speedButtons.Count;i++){float v=i==0?0:i==1?1:3; SetButtonColor(speedButtons[i],Mathf.Approximately(controller.GameSpeed,v)?Coral:Navy2);}
             FactoryKind factoryTool=controller.Factory==null?FactoryKind.None:controller.Factory.SelectedTool;
-            modeText.text=controller.Factory!=null&&controller.Factory.RemovalMode?"설비 철거":factoryTool!=FactoryKind.None?FactoryCatalog.Get(factoryTool).Name+" 배치":controller.DemolitionMode?"철거 모드":controller.SelectedTool!=BuildingKind.None?Catalog.Get(controller.SelectedTool).Name+" 배치":"건설 도구";
+            modeText.text=ActiveToolSummary(factoryTool);
+            if(buildCollapseButton!=null)buildCollapseButton.GetComponentInChildren<Text>().text=buildTrayOpen?"목록 ▾":"목록 ▴";
+            bool removal=controller.DemolitionMode||(controller.Factory!=null&&controller.Factory.RemovalMode);
+            SetButtonColor(removeButton,removal?HudStyle.Danger:HudStyle.SurfaceRaised);
+            if(removeButton!=null&&!removal)
+            {
+                Text removeLabel=removeButton.GetComponentInChildren<Text>();if(removeLabel!=null)removeLabel.color=HudStyle.Danger;
+            }
             helpOverlay.SetActive(controller.HelpOpen);
             researchOverlay.SetActive(controller.ResearchOpen);
             RefreshModalOverlays();
@@ -447,6 +599,44 @@ namespace Riverworks
                 lastNoticeVersion=controller.NoticeVersion;
                 if(!string.IsNullOrEmpty(controller.Notice)){noticeText.text=controller.Notice;noticeVisibleUntil=Time.unscaledTime+4f;}
             }
+        }
+
+        void RefreshAdvancedResourceVisibility(Simulation sim,GameState state)
+        {
+            if(!ReferenceEquals(observedUiState,state))
+            {
+                observedUiState=state;stickyResourceVisibility.Clear();
+            }
+            Resource[] advanced={Resource.Ore,Resource.Steel,Resource.Tools};
+            BuildingKind[] buildings={BuildingKind.Mine,BuildingKind.Smelter,BuildingKind.Workshop};
+            for(int i=0;i<advanced.Length;i++)
+            {
+                Resource resource=advanced[i];bool shown;
+                stickyResourceVisibility.TryGetValue(resource,out shown);
+                TechId required=TechCatalog.RequiredTechnology(buildings[i]);
+                bool unlocked=required==TechId.None||TechCatalog.Has(state,required);
+                bool built=state.Cells!=null&&state.Cells.Any(cell=>cell.Building==buildings[i]);
+                shown=shown||sim.Get(resource)>0||unlocked||built;
+                stickyResourceVisibility[resource]=shown;
+                GameObject chip;if(resourceChips.TryGetValue(resource,out chip))chip.SetActive(shown);
+            }
+        }
+
+        string ActiveToolSummary(FactoryKind factoryTool)
+        {
+            if(controller.Factory!=null&&controller.Factory.RemovalMode)return "설비 철거\n선택한 설비를 제거합니다";
+            if(controller.DemolitionMode)return "철거 모드\n선택한 건물을 제거합니다";
+            if(factoryTool!=FactoryKind.None)
+            {
+                FactorySpec spec=FactoryCatalog.Get(factoryTool);
+                return spec.Name+" 배치\n"+spec.CoinCost+"G · 목재 "+spec.TimberCost+" · 석재 "+spec.StoneCost;
+            }
+            if(controller.SelectedTool!=BuildingKind.None)
+            {
+                BuildingSpec spec=Catalog.Get(controller.SelectedTool);
+                return spec.Name+" 배치\n"+spec.Cost+"G · 목재 "+spec.TimberCost+" · 석재 "+spec.StoneCost;
+            }
+            return "건설 도구";
         }
 
         void RefreshInspector()
@@ -461,8 +651,19 @@ namespace Riverworks
             {
                 FactorySpec spec=FactoryCatalog.Get(machine.Kind);
                 inspectorTitle.text=spec==null?"산업 설비":spec.Name;
-                string configuration=machine.Kind==FactoryKind.Furnace||machine.Kind==FactoryKind.Assembler?"\n제조법  "+FactoryCatalog.RecipeName(machine.Recipe):machine.Kind==FactoryKind.Inserter?"\n필터  "+(machine.Filter==Resource.Coins?"모든 물자":Catalog.ResourceName(machine.Filter)):"";
-                inspectorBody.text="설비 #"+machine.Id+"  ·  미세 좌표 "+machine.X+", "+machine.Z+"\n방향  "+DirectionText(machine.Direction)+"  ·  크기 "+spec.Width+"×"+spec.Height+" 미세 칸\n전력  "+(machine.Powered?"공급됨":"공급 필요")+"  ·  수요 "+spec.PowerDemand.ToString("0.##")+configuration+"\n투입  "+FactoryInventoryText(machine.Input)+"\n출력  "+FactoryInventoryText(machine.Output)+"\n"+FactoryActivityText(machine)+(string.IsNullOrEmpty(machine.Status)?"상태 확인 중":machine.Status);
+                string status=string.IsNullOrEmpty(machine.Status)?"상태 확인 중":machine.Status;
+                bool bad=!machine.Powered||StatusIsProblem(status);
+                var rows=new List<InspectorRow>();
+                rows.Add(new InspectorRow("상태",(bad?"●  ":"")+status,bad));
+                string configuration=machine.Kind==FactoryKind.Furnace||machine.Kind==FactoryKind.Assembler?FactoryCatalog.RecipeName(machine.Recipe):machine.Kind==FactoryKind.Inserter?(machine.Filter==Resource.Coins?"모든 물자":Catalog.ResourceName(machine.Filter)):"";
+                if(!string.IsNullOrEmpty(configuration))rows.Add(new InspectorRow(machine.Kind==FactoryKind.Inserter?"필터":"제조법",configuration));
+                string activity=FactoryActivityText(machine).Trim().Trim('·').Trim();
+                rows.Add(new InspectorRow("생산",string.IsNullOrEmpty(activity)?"대기":activity));
+                if(spec!=null&&spec.PowerDemand>0)rows.Add(new InspectorRow("전력",(machine.Powered?"공급됨":"●  공급 필요")+" · "+spec.PowerDemand.ToString("0.##"),!machine.Powered));
+                rows.Add(new InspectorRow("투입",FactoryInventoryText(machine.Input)));
+                rows.Add(new InspectorRow("출력",FactoryInventoryText(machine.Output)));
+                rows.Add(new InspectorRow("좌표","설비 #"+machine.Id+" · "+machine.X+", "+machine.Z+" · "+DirectionText(machine.Direction),false,true));
+                SetInspectorRows(rows);
                 upgradeButton.gameObject.SetActive(false);
                 factoryConfigureButton.gameObject.SetActive(true);
                 factoryConfigureButton.interactable=controller.Factory!=null;
@@ -471,6 +672,7 @@ namespace Riverworks
             {
                 inspectorTitle.text="주민 정보";
                 inspectorBody.text=controller.ResidentDetails+"\n\n현재 거리의 주민  "+controller.PeopleOnStreet+"명";
+                inspectorBody.gameObject.SetActive(true);inspectorRowsRoot.gameObject.SetActive(false);
             }
             else
             {
@@ -478,14 +680,73 @@ namespace Riverworks
                 string building=c.Building==BuildingKind.None?"빈 터":Catalog.Get(c.Building).Name;
                 inspectorTitle.text=building;
                 string recipe=c.Building==BuildingKind.None?"":RecipeText(Catalog.Get(c.Building),c.Level);
-                inspectorBody.text="좌표  "+c.X+", "+c.Z+"  ·  지역 "+(region+1)+"\n"+(owned?"내 영토":"미소유 영토")+"  ·  "+TerrainName(c.Terrain)+"\n"+(c.Building==BuildingKind.None?"":("레벨 "+c.Level+"  ·  "+(c.Connected?"도로 연결됨":"연결 끊김")+"\n"))+(!string.IsNullOrEmpty(c.Status)?c.Status:"상태 양호")+(string.IsNullOrEmpty(recipe)?"":"\n"+recipe)+"\n동력 "+controller.PowerUsageText+" / "+controller.Sim.PowerCapacity;
+                string status=!string.IsNullOrEmpty(c.Status)?c.Status:(c.Building!=BuildingKind.None&&!c.Connected?"연결 끊김":"상태 양호");
+                bool bad=StatusIsProblem(status)||(c.Building!=BuildingKind.None&&!c.Connected);
+                var rows=new List<InspectorRow>();rows.Add(new InspectorRow("상태",(bad?"●  ":"")+status,bad));
+                if(!string.IsNullOrEmpty(recipe))rows.Add(new InspectorRow("생산",recipe));
+                if(c.Building!=BuildingKind.None)rows.Add(new InspectorRow("레벨","Lv."+c.Level));
+                if(IsPoweredBuilding(c.Building))rows.Add(new InspectorRow("전력",controller.PowerUsageText+" / "+controller.Sim.PowerCapacity));
+                rows.Add(new InspectorRow("지형",(owned?"내 영토":"미소유 영토")+" · "+TerrainName(c.Terrain)));
+                rows.Add(new InspectorRow("좌표",c.X+", "+c.Z+" · 지역 "+(region+1),false,true));
+                SetInspectorRows(rows);
             }
-            if(machine==null)
+            if(machine==null&&!hasResident)
             {
                 upgradeButton.gameObject.SetActive(true);
                 factoryConfigureButton.gameObject.SetActive(false);
                 RefreshUpgrade(c);
             }
+            else if(hasResident)
+            {
+                upgradeButton.gameObject.SetActive(false);factoryConfigureButton.gameObject.SetActive(false);
+            }
+        }
+
+        struct InspectorRow
+        {
+            public readonly string Label,Value;public readonly bool Danger,Muted;
+            public InspectorRow(string label,string value,bool danger=false,bool muted=false){Label=label;Value=value;Danger=danger;Muted=muted;}
+        }
+
+        void CreateInspectorRow(Transform parent)
+        {
+            GameObject row=new GameObject("InspectorRow",typeof(RectTransform),typeof(LayoutElement),typeof(HorizontalLayoutGroup));row.transform.SetParent(parent,false);row.GetComponent<LayoutElement>().preferredHeight=20;
+            HorizontalLayoutGroup layout=row.GetComponent<HorizontalLayoutGroup>();layout.spacing=4;layout.childControlWidth=true;layout.childControlHeight=true;layout.childForceExpandWidth=false;layout.childForceExpandHeight=true;
+            Text label=Label("",row.transform,HudStyle.BodySize,HudStyle.TextMuted,FontStyle.Normal,TextAnchor.MiddleLeft);
+            LayoutElement labelLayout=label.gameObject.AddComponent<LayoutElement>();labelLayout.minWidth=72;labelLayout.preferredWidth=72;labelLayout.flexibleWidth=0;
+            Text value=Label("",row.transform,HudStyle.BodySize,HudStyle.Text,FontStyle.Normal,TextAnchor.MiddleLeft);
+            LayoutElement valueLayout=value.gameObject.AddComponent<LayoutElement>();valueLayout.minWidth=0;valueLayout.flexibleWidth=1;
+            value.horizontalOverflow=HorizontalWrapMode.Wrap;value.verticalOverflow=VerticalWrapMode.Overflow;inspectorRowLabels.Add(label);inspectorRowValues.Add(value);
+        }
+
+        void SetInspectorRows(IList<InspectorRow> rows)
+        {
+            inspectorBody.gameObject.SetActive(false);inspectorRowsRoot.gameObject.SetActive(true);
+            for(int i=0;i<inspectorRowLabels.Count;i++)
+            {
+                bool active=i<rows.Count;inspectorRowLabels[i].transform.parent.gameObject.SetActive(active);if(!active)continue;
+                InspectorRow row=rows[i];inspectorRowLabels[i].text=row.Label;inspectorRowValues[i].text=row.Value;
+                inspectorRowValues[i].color=row.Danger?HudStyle.Danger:row.Muted?HudStyle.TextMuted:HudStyle.Text;
+            }
+            LayoutRebuilder.ForceRebuildLayoutImmediate(inspectorRowsRoot);Canvas.ForceUpdateCanvases();
+            for(int i=0;i<inspectorRowLabels.Count;i++)
+            {
+                if(!inspectorRowLabels[i].transform.parent.gameObject.activeSelf)continue;
+                LayoutElement rowLayout=inspectorRowLabels[i].transform.parent.GetComponent<LayoutElement>();
+                if(rowLayout!=null)rowLayout.preferredHeight=Mathf.Max(20,inspectorRowValues[i].preferredHeight+2);
+            }
+            LayoutRebuilder.ForceRebuildLayoutImmediate(inspectorRowsRoot);
+        }
+
+        static bool IsPoweredBuilding(BuildingKind kind)
+        {
+            return kind==BuildingKind.Mill||kind==BuildingKind.Bakery||kind==BuildingKind.Mine||kind==BuildingKind.Smelter||kind==BuildingKind.Workshop||kind==BuildingKind.Windmill||kind==BuildingKind.SteamPlant;
+        }
+
+        static bool StatusIsProblem(string status)
+        {
+            if(string.IsNullOrEmpty(status))return false;
+            return status.Contains("부족")||status.Contains("필요")||status.Contains("끊김")||status.Contains("중단")||status.Contains("없음");
         }
 
         void RefreshBuildChoices()
@@ -506,7 +767,10 @@ namespace Riverworks
                 bool affordable=controller.State.Coins>=spec.Cost && controller.Sim.Get(Resource.Timber)>=spec.TimberCost && controller.Sim.Get(Resource.Stone)>=spec.StoneCost;
                 pair.Value.interactable=unlocked && affordable;
                 SetButtonColor(pair.Value,controller.SelectedTool==pair.Key?Coral:(unlocked&&affordable?Navy2:new Color(.28f,.32f,.36f,1)));
-                buildLabels[pair.Key].text=spec.Name+"\n"+(unlocked?spec.Cost+"G":ShortReason(lockReason));
+                TechId required=TechCatalog.RequiredTechnology(pair.Key);
+                string requiredName=required==TechId.None?"잠김":TechCatalog.Get(required).Name;
+                buildLabels[pair.Key].text=spec.Name+"\n"+(unlocked?spec.Cost+"G":"잠김 "+requiredName);
+                SetBuildTooltip(pair.Value,spec.Description+"\n비용 "+spec.Cost+"G · 목재 "+spec.TimberCost+" · 석재 "+spec.StoneCost+(unlocked?"":"\n"+lockReason));
             }
             foreach(var pair in factoryButtons)
             {
@@ -519,7 +783,10 @@ namespace Riverworks
                 pair.Value.interactable=available;
                 bool selected=controller.Factory!=null && controller.Factory.SelectedTool==pair.Key;
                 SetButtonColor(pair.Value,selected?Coral:(available?Navy2:new Color(.28f,.32f,.36f,1)));
-                factoryLabels[pair.Key].text=spec.Name+"\n"+(available?spec.CoinCost+"G":ShortReason(reason));
+                bool techUnlocked=spec.RequiredTech==TechId.None||TechCatalog.Has(controller.State,spec.RequiredTech);
+                string technology=spec.RequiredTech==TechId.None?"잠김":TechCatalog.Get(spec.RequiredTech).Name;
+                factoryLabels[pair.Key].text=spec.Name+"\n"+(techUnlocked?spec.CoinCost+"G":"잠김 "+technology);
+                SetBuildTooltip(pair.Value,spec.Description+"\n비용 "+spec.CoinCost+"G · 목재 "+spec.TimberCost+" · 석재 "+spec.StoneCost+(available?"":"\n"+reason));
             }
             if(factoryRotateButton!=null)
             {
@@ -532,6 +799,7 @@ namespace Riverworks
                 LayoutRebuilder.ForceRebuildLayoutImmediate(buildViewport);
                 Canvas.ForceUpdateCanvases();
             }
+            ResizeConstructionPanels();
         }
 
         public bool VerifyLayout(out string reason)
@@ -572,7 +840,9 @@ namespace Riverworks
             foreach(TechId id in initialResearch)
             {
                 TechSpec spec=TechCatalog.Get(id);
-                if(spec==null)continue;
+                // Completed cards move below available research and hide their action.
+                // The first-screen contract applies while these starting actions still exist.
+                if(spec==null || TechCatalog.Has(controller.State,id))continue;
                 RectTransform viewport;
                 RectTransform cardRect;
                 if(!researchViewports.TryGetValue(spec.Era,out viewport) || !researchCardRects.TryGetValue(id,out cardRect) || !ContainsBounds(viewport,cardRect,1f)){reason="초기 연구 버튼이 첫 화면에 보이지 않습니다: "+id;return false;}
@@ -666,14 +936,6 @@ namespace Riverworks
             switch(terrain){case TerrainKind.Forest:return "숲";case TerrainKind.Rock:return "바위";case TerrainKind.Water:return "물";default:return "평지";}
         }
 
-        static string ShortReason(string reason)
-        {
-            if(string.IsNullOrEmpty(reason)) return "잠김";
-            const int max=13;
-            string clean=reason.Replace("필요합니다."," 필요").Replace("필요합니다"," 필요").Replace("연구가 ","");
-            return clean.Length<=max?clean:clean.Substring(0,max-1)+"…";
-        }
-
         static string RecipeText(BuildingSpec spec, int level)
         {
             if(spec==null || spec.OutputAmount<=0)return "";
@@ -743,7 +1005,7 @@ namespace Riverworks
 
         Text Label(string value, Transform parent, int size, Color color, FontStyle style, TextAnchor align)
         {
-            GameObject go=new GameObject("Text",typeof(RectTransform),typeof(Text));go.transform.SetParent(parent,false);Text t=go.GetComponent<Text>();t.text=value;t.font=font;t.fontSize=size;t.color=color;t.fontStyle=style;t.alignment=align;t.supportRichText=true;t.raycastTarget=false;t.horizontalOverflow=HorizontalWrapMode.Wrap;t.verticalOverflow=VerticalWrapMode.Truncate;return t;
+            GameObject go=new GameObject("Text",typeof(RectTransform),typeof(Text));go.transform.SetParent(parent,false);Text t=go.GetComponent<Text>();t.text=value;t.font=font;t.fontSize=size>=20?HudStyle.TitleSize:HudStyle.BodySize;t.color=color;t.fontStyle=FontStyle.Normal;t.alignment=align;t.supportRichText=true;t.raycastTarget=false;t.horizontalOverflow=HorizontalWrapMode.Wrap;t.verticalOverflow=VerticalWrapMode.Truncate;return t;
         }
 
         Text LabelAt(string value,Transform parent,int size,Color color,FontStyle style,Vector2 pos,Vector2 dimensions)
@@ -751,7 +1013,7 @@ namespace Riverworks
 
         Button MakeButton(string value,Transform parent,Vector2 pos,Vector2 size,Color color,UnityEngine.Events.UnityAction click,Vector2 pivot,int textSize=13)
         {
-            GameObject go=Box("Button_"+value,parent,pos,size,color,pivot);Button b=go.AddComponent<Button>();Image image=go.GetComponent<Image>();image.sprite=HudAssets.Panel??rounded;image.type=Image.Type.Sliced;b.targetGraphic=image;ColorBlock cb=b.colors;cb.normalColor=Color.white;cb.highlightedColor=new Color(1.08f,1.08f,1.08f,1);cb.pressedColor=new Color(.82f,.82f,.82f,1);cb.disabledColor=new Color(.56f,.56f,.56f,.7f);b.colors=cb;b.onClick.AddListener(click);Text t=Label(value,go.transform,textSize,Cream,FontStyle.Bold,TextAnchor.MiddleCenter);Rect(t.gameObject,Vector2.zero,Vector2.one,new Vector2(4,2),new Vector2(-4,-2));FeelUiFeedback.AttachButton(b);return b;
+            GameObject go=Box("Button_"+value,parent,pos,size,color,pivot);Button b=go.AddComponent<Button>();Image image=go.GetComponent<Image>();image.sprite=HudAssets.Panel??rounded;image.type=Image.Type.Sliced;b.targetGraphic=image;ColorBlock cb=b.colors;cb.normalColor=Color.white;cb.highlightedColor=new Color(1.08f,1.08f,1.08f,1);cb.pressedColor=new Color(.82f,.82f,.82f,1);cb.disabledColor=new Color(.56f,.56f,.56f,.7f);b.colors=cb;b.onClick.AddListener(()=>{HudTooltipTrigger tooltip=go.GetComponent<HudTooltipTrigger>();if(tooltip==null||!tooltip.ConsumeClick)click();});Text t=Label(value,go.transform,textSize,HudStyle.Foreground(color),FontStyle.Normal,TextAnchor.MiddleCenter);Rect(t.gameObject,Vector2.zero,Vector2.one,new Vector2(4,2),new Vector2(-4,-2));FeelUiFeedback.AttachButton(b);return b;
         }
 
         void AddButtonIcon(Button button,string semanticName)
@@ -762,17 +1024,20 @@ namespace Riverworks
             GameObject icon=new GameObject("Icon_"+semanticName,typeof(RectTransform),typeof(Image));
             icon.transform.SetParent(button.transform,false);
             Rect(icon,new Vector2(0,.5f),new Vector2(0,.5f),new Vector2(16,0),new Vector2(20,20));
-            Image image=icon.GetComponent<Image>();image.sprite=sprite;image.color=Cream;image.preserveAspect=true;image.raycastTarget=false;
+            Image image=icon.GetComponent<Image>();image.sprite=sprite;image.color=button.targetGraphic==null?Cream:HudStyle.Foreground(button.targetGraphic.color);image.preserveAspect=true;image.raycastTarget=false;
             Text label=button.GetComponentInChildren<Text>();
             if(label!=null)Rect(label.gameObject,Vector2.zero,Vector2.one,new Vector2(26,2),new Vector2(-4,-2));
         }
 
         void AddHover(GameObject go,UnityEngine.Events.UnityAction enter,UnityEngine.Events.UnityAction exit)
         {EventTrigger tr=go.AddComponent<EventTrigger>();AddTrigger(tr,EventTriggerType.PointerEnter,enter);AddTrigger(tr,EventTriggerType.PointerExit,exit);}
-        void AddClick(GameObject go,PointerEventData.InputButton button,UnityEngine.Events.UnityAction action)
-        {EventTrigger tr=go.GetComponent<EventTrigger>();if(tr==null)tr=go.AddComponent<EventTrigger>();EventTrigger.Entry e=new EventTrigger.Entry{eventID=EventTriggerType.PointerClick};e.callback.AddListener(d=>{PointerEventData p=d as PointerEventData;if(p!=null&&p.button==button)action();});tr.triggers.Add(e);}
         static void AddTrigger(EventTrigger tr,EventTriggerType type,UnityEngine.Events.UnityAction a){EventTrigger.Entry e=new EventTrigger.Entry{eventID=type};e.callback.AddListener(_=>a());tr.triggers.Add(e);}
-        static void SetButtonColor(Button b,Color c){if(b!=null&&b.targetGraphic!=null)b.targetGraphic.color=c;}
+        static void SetButtonColor(Button b,Color c)
+        {
+            if(b==null||b.targetGraphic==null)return;b.targetGraphic.color=c;Color foreground=HudStyle.Foreground(c);
+            foreach(Text text in b.GetComponentsInChildren<Text>(true))text.color=foreground;
+            foreach(Image image in b.GetComponentsInChildren<Image>(true))if(image.gameObject!=b.gameObject)image.color=foreground;
+        }
 
         static void Rect(GameObject go,Vector2 amin,Vector2 amax,Vector2 offsetOrPos,Vector2 sizeOrOffset)
         {RectTransform rt=go.GetComponent<RectTransform>();rt.anchorMin=amin;rt.anchorMax=amax;if(amin==amax){rt.anchoredPosition=offsetOrPos;rt.sizeDelta=sizeOrOffset;}else{rt.offsetMin=offsetOrPos;rt.offsetMax=sizeOrOffset;}}

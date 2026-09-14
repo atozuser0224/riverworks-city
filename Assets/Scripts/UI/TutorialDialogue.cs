@@ -20,16 +20,11 @@ namespace Riverworks
         const int PreferredBreakFloor = 72;
         static readonly float[] VoicePitches = { .92f, .98f, 1.04f, 1.09f, .96f };
 
-        static readonly Color Navy = Hex("172437");
-        static readonly Color Navy2 = Hex("24384F");
-        static readonly Color Brass = Hex("D5A84B");
-        static readonly Color Cream = Hex("F4ECD8");
-        static readonly Color Muted = Hex("B8B5A8");
-        static readonly Color Teal = Hex("4EBFAF");
-
         readonly List<int> textElementEnds = new List<int>(256);
         readonly List<string> textElements = new List<string>(256);
         readonly List<string> pages = new List<string>(8);
+        readonly List<RectTransform> topicButtons = new List<RectTransform>(5);
+        readonly List<RectTransform> lessonButtons = new List<RectTransform>(24);
         readonly TextGenerator pageLayoutGenerator = new TextGenerator();
 
         TutorialDirector director;
@@ -39,7 +34,16 @@ namespace Riverworks
         GameObject introSkipRoot;
         GameObject topicRow;
         GameObject lessonPicker;
+        GameObject morePopup;
+        RectTransform bodyHitRect;
         RectTransform expandedRect;
+        RectTransform topicRect;
+        RectTransform lessonPickerRect;
+        RectTransform lessonContentRect;
+        RectTransform morePopupRect;
+        RectTransform goalRect;
+        RectTransform advanceRect;
+        RectTransform moreRect;
         Text speakerText;
         Text titleText;
         Text bodyText;
@@ -50,6 +54,7 @@ namespace Riverworks
         Button advanceButton;
         Button skipButton;
         Button restartButton;
+        Button guidanceLessonsButton;
         Button nextLessonButton;
         Button followGuideButton;
         Text guidanceToggleText;
@@ -68,6 +73,14 @@ namespace Riverworks
         bool typing;
         bool lastObscured;
         bool lessonPickerOpen;
+        bool morePopupOpen;
+        bool lastConstructionBarVisible;
+        bool lastAdviceMode;
+        float lastConstructionBarHeight = -1f;
+        int lastScreenWidth = -1;
+        int lastScreenHeight = -1;
+        Rect lastSafeArea;
+        Vector2 lastSafeSize;
 
         public bool Typing => typing;
         public bool Visible =>
@@ -78,9 +91,14 @@ namespace Riverworks
         public string CurrentPageText => pages.Count == 0 ? "" : pages[pageIndex];
         public int RevealedCharacters => revealedCharacters;
         public bool CurrentPageFits => PageFits(CurrentPageText);
+        public bool ActualPageFits => PageFits(CurrentPageText);
         /// <summary>Zero-based index of the page currently presented.</summary>
         public int PageIndex => pageIndex;
         public int PageCount => pages.Count;
+        /// <summary>True while the compact overflow menu is visible. Used by smoke diagnostics.</summary>
+        public bool DialogMoreVisible => morePopup != null && morePopup.activeInHierarchy;
+        /// <summary>True while the guidance lesson picker is visible. Used by smoke diagnostics.</summary>
+        public bool DialogLessonPickerVisible => lessonPicker != null && lessonPicker.activeInHierarchy;
 
         /// <summary>Safe to call more than once; rebuilds only when the HUD parent changes.</summary>
         public void Initialize(TutorialDirector value, Transform parent)
@@ -107,6 +125,8 @@ namespace Riverworks
         void Update()
         {
             if (director == null) return;
+
+            ApplyResponsiveLayout(false);
 
             bool obscured = IsObscured();
             if (obscured != lastObscured) Refresh(false);
@@ -144,107 +164,136 @@ namespace Riverworks
         {
             font = GameFont.Load();
             EnsureVoice();
+            topicButtons.Clear();
+            lessonButtons.Clear();
 
-            expandedRoot = Surface("TutorialDialogue", visualParent, Navy, new Vector2(.5f, 0f),
-                new Vector2(0f, 68f), new Vector2(660f, 156f));
+            expandedRoot = Surface("TutorialDialogue", visualParent, HudStyle.Surface, new Vector2(.5f, 0f),
+                new Vector2(0f, 68f), new Vector2(680f, 174f));
             expandedRect = expandedRoot.GetComponent<RectTransform>();
             FeelUiFeedback.AttachPanel(expandedRoot);
 
-            speakerText = Label("단우", expandedRoot.transform, 12, Brass, FontStyle.Bold,
-                TextAnchor.MiddleLeft, new Vector2(14f, -8f), new Vector2(64f, 24f));
+            speakerText = Label("단우", expandedRoot.transform, HudStyle.BodySize, HudStyle.Accent, FontStyle.Normal,
+                TextAnchor.MiddleLeft, new Vector2(14f, -8f), new Vector2(64f, 28f));
 
-            titleText = Label("", expandedRoot.transform, 15, Brass, FontStyle.Bold,
-                TextAnchor.MiddleLeft, new Vector2(84f, -8f), new Vector2(360f, 24f));
-            pageIndicatorText = Label("", expandedRoot.transform, 11, Muted, FontStyle.Bold,
-                TextAnchor.MiddleRight, new Vector2(452f, -8f), new Vector2(82f, 24f));
+            titleText = Label("", expandedRoot.transform, HudStyle.TitleSize, HudStyle.Text, FontStyle.Normal,
+                TextAnchor.MiddleLeft, new Vector2(84f, -8f), new Vector2(470f, 28f));
+            pageIndicatorText = Label("", expandedRoot.transform, HudStyle.BodySize, HudStyle.TextMuted, FontStyle.Normal,
+                TextAnchor.MiddleRight, new Vector2(570f, -8f), new Vector2(92f, 28f));
 
             GameObject bodyHit = Surface("TutorialDialogueBody", expandedRoot.transform,
-                new Color(Navy2.r, Navy2.g, Navy2.b, .58f), new Vector2(0f, 1f),
-                new Vector2(14f, -35f), new Vector2(522f, 79f));
+                HudStyle.SurfaceRaised, new Vector2(0f, 1f),
+                new Vector2(14f, -42f), new Vector2(652f, 76f));
+            bodyHitRect = bodyHit.GetComponent<RectTransform>();
             Button bodyButton = bodyHit.AddComponent<Button>();
             bodyButton.targetGraphic = bodyHit.GetComponent<Image>();
             bodyButton.transition = Selectable.Transition.None;
             bodyButton.onClick.AddListener(OnAdvance);
             FeelUiFeedback.AttachButton(bodyButton);
-            bodyText = Label("", bodyHit.transform, 16, Cream, FontStyle.Normal,
-                TextAnchor.UpperLeft, new Vector2(10f, -5f), new Vector2(502f, 69f));
+            bodyText = Label("", bodyHit.transform, HudStyle.BodySize, HudStyle.Text, FontStyle.Normal,
+                TextAnchor.UpperLeft, new Vector2(10f, -5f), new Vector2(632f, 66f));
             bodyText.resizeTextForBestFit = false;
 
-            goalText = Label("", expandedRoot.transform, 12, Muted, FontStyle.Bold,
-                TextAnchor.MiddleLeft, new Vector2(14f, -119f), new Vector2(410f, 28f));
+            goalText = Label("", expandedRoot.transform, HudStyle.BodySize, HudStyle.TextMuted, FontStyle.Normal,
+                TextAnchor.MiddleLeft, new Vector2(144f, -124f), new Vector2(282f, 44f));
+            goalRect = goalText.rectTransform;
 
-            Button followGuide = MakeButton("단우 보기", expandedRoot.transform, new Vector2(432f, -112f),
-                new Vector2(104f, 44f), Navy2, OnFocusGuide, 11);
+            Button collapse = MakeButton("접기", expandedRoot.transform, new Vector2(14f, -124f),
+                new Vector2(58f, HudStyle.TouchSize), HudStyle.SurfaceRaised, OnCollapse);
+            collapse.name = "Button_TutorialCollapse";
+
+            Button followGuide = MakeButton("단우 보기", expandedRoot.transform, new Vector2(78f, -124f),
+                new Vector2(60f, HudStyle.TouchSize), HudStyle.SurfaceRaised, OnFocusGuide);
             followGuide.name = "Button_TutorialFollowGuide";
             followGuideButton = followGuide;
 
-            Button collapse = MakeButton("접기", expandedRoot.transform, new Vector2(546f, -6f),
-                new Vector2(50f, 44f), Navy2, OnCollapse, 11);
-            collapse.name = "Button_TutorialCollapse";
-            Button skip = MakeButton("건너뛰기", expandedRoot.transform, new Vector2(602f, -6f),
-                new Vector2(50f, 44f), new Color(.42f, .27f, .27f, 1f), OnSkip, 9);
+            advanceButton = MakeButton("계속", expandedRoot.transform, new Vector2(480f, -124f),
+                new Vector2(112f, HudStyle.TouchSize), HudStyle.Accent, OnAdvance);
+            advanceButton.name = "Button_TutorialAdvance";
+            advanceText = advanceButton.GetComponentInChildren<Text>();
+            advanceRect = advanceButton.GetComponent<RectTransform>();
+
+            Button more = MakeButton("...", expandedRoot.transform, new Vector2(598f, -124f),
+                new Vector2(68f, HudStyle.TouchSize), HudStyle.SurfaceRaised, OnToggleMorePopup);
+            more.name = "Button_TutorialMore";
+            moreRect = more.GetComponent<RectTransform>();
+
+            morePopup = Surface("TutorialMorePopup", expandedRoot.transform, HudStyle.SurfaceRaised,
+                new Vector2(1f, 0f), new Vector2(-14f, 52f), new Vector2(224f, 244f));
+            morePopupRect = morePopup.GetComponent<RectTransform>();
+
+            Button skip = MakeButton("건너뛰기", morePopup.transform, new Vector2(4f, -4f),
+                new Vector2(216f, HudStyle.TouchSize), HudStyle.Surface, OnSkip);
             skip.name = "Button_TutorialSkip";
             skipButton = skip;
 
-            restartButton = MakeButton("처음부터", expandedRoot.transform, new Vector2(602f, -6f),
-                new Vector2(50f, 44f), new Color(.42f, .31f, .20f, 1f), OnRestart, 9);
+            restartButton = MakeButton("처음부터", morePopup.transform, new Vector2(4f, -4f),
+                new Vector2(216f, HudStyle.TouchSize), HudStyle.Surface, OnRestart);
             restartButton.name = "Button_TutorialRestart";
 
-            advanceButton = MakeButton("계속", expandedRoot.transform, new Vector2(546f, -56f),
-                new Vector2(106f, 92f), Brass, OnAdvance, 14);
-            advanceButton.name = "Button_TutorialAdvance";
-            advanceText = advanceButton.GetComponentInChildren<Text>();
-
-            topicRow = Surface("TutorialAdviceTopics", expandedRoot.transform, Navy2, new Vector2(0f, 1f),
-                new Vector2(10f, -162f), new Vector2(640f, 48f));
-            BuildTopicButton("도시", "Button_Advice_City", AdvisorTopic.City, 4f);
-            BuildTopicButton("생산", "Button_Advice_Production", AdvisorTopic.Production, 66f);
-            BuildTopicButton("연구", "Button_Advice_Research", AdvisorTopic.Research, 128f);
-            BuildTopicButton("설비", "Button_Advice_Factory", AdvisorTopic.Factory, 190f);
-            BuildTopicButton("영토", "Button_Advice_Territory", AdvisorTopic.Territory, 252f);
-            Button lessonList = MakeButton("기능 목록", topicRow.transform, new Vector2(314f, -2f),
-                new Vector2(104f, 44f), Navy, OnToggleLessonPicker, 10);
-            lessonList.name = "Button_GuidanceLessons";
-            nextLessonButton = MakeButton("다음 기능", topicRow.transform, new Vector2(422f, -2f),
-                new Vector2(104f, 44f), Brass, OnNextLesson, 10);
+            guidanceLessonsButton = MakeButton("기능 목록", morePopup.transform, new Vector2(4f, -52f),
+                new Vector2(216f, HudStyle.TouchSize), HudStyle.Surface, OnToggleLessonPicker);
+            guidanceLessonsButton.name = "Button_GuidanceLessons";
+            nextLessonButton = MakeButton("다음 기능", morePopup.transform, new Vector2(4f, -100f),
+                new Vector2(216f, HudStyle.TouchSize), HudStyle.Surface, OnNextLesson);
             nextLessonButton.name = "Button_GuidanceNext";
-            Button guidanceToggle = MakeButton("기능 팁 끄기", topicRow.transform, new Vector2(530f, -2f),
-                new Vector2(106f, 44f), Navy, OnToggleGuidance, 10);
+            Button guidanceToggle = MakeButton("기능 팁 끄기", morePopup.transform, new Vector2(4f, -148f),
+                new Vector2(216f, HudStyle.TouchSize), HudStyle.Surface, OnToggleGuidance);
             guidanceToggle.name = "Button_GuidanceToggle";
             guidanceToggleText = guidanceToggle.GetComponentInChildren<Text>();
+            morePopup.SetActive(false);
+
+            topicRow = Surface("TutorialAdviceTopics", expandedRoot.transform, HudStyle.SurfaceRaised, new Vector2(0f, 1f),
+                new Vector2(10f, -178f), new Vector2(660f, 48f));
+            topicRect = topicRow.GetComponent<RectTransform>();
+            BuildTopicButton("도시", "Button_Advice_City", AdvisorTopic.City, 4f);
+            BuildTopicButton("생산", "Button_Advice_Production", AdvisorTopic.Production, 134f);
+            BuildTopicButton("연구", "Button_Advice_Research", AdvisorTopic.Research, 264f);
+            BuildTopicButton("설비", "Button_Advice_Factory", AdvisorTopic.Factory, 394f);
+            BuildTopicButton("영토", "Button_Advice_Territory", AdvisorTopic.Territory, 524f);
             topicRow.SetActive(false);
 
             BuildLessonPicker();
 
-            collapsedRoot = Surface("TutorialDialogueHint", visualParent, new Color(Navy.r, Navy.g, Navy.b, .97f),
-                new Vector2(0f, 1f), new Vector2(8f, -110f), new Vector2(292f, 44f));
+            collapsedRoot = Surface("TutorialDialogueHint", visualParent, HudStyle.Surface,
+                 new Vector2(0f, 1f), new Vector2(8f, -110f), new Vector2(292f, 44f));
+            Surface("TutorialDialogueHintAccent", collapsedRoot.transform, HudStyle.Accent,
+                new Vector2(0f, 1f), Vector2.zero, new Vector2(4f, 44f), null);
             Button reopen = collapsedRoot.AddComponent<Button>();
             reopen.targetGraphic = collapsedRoot.GetComponent<Image>();
             reopen.onClick.AddListener(OnReopen);
             reopen.name = "Button_TutorialReopen";
             collapsedRoot.name = "Button_TutorialReopen";
             FeelUiFeedback.AttachButton(reopen);
-            collapsedText = Label("단우 길잡이", collapsedRoot.transform, 12, Cream, FontStyle.Bold,
+            collapsedText = Label("단우 길잡이", collapsedRoot.transform, HudStyle.BodySize, HudStyle.Text, FontStyle.Normal,
                 TextAnchor.MiddleLeft, new Vector2(12f, 0f), new Vector2(244f, 44f));
-            Label("›", collapsedRoot.transform, 18, Brass, FontStyle.Bold,
+            Label("›", collapsedRoot.transform, HudStyle.TitleSize, HudStyle.Accent, FontStyle.Normal,
                 TextAnchor.MiddleCenter, new Vector2(258f, 0f), new Vector2(26f, 44f));
 
-            introSkipRoot = Surface("Button_IntroSkip", visualParent, new Color(Navy.r, Navy.g, Navy.b, .97f),
+            introSkipRoot = Surface("Button_IntroSkip", visualParent, HudStyle.Surface,
                 new Vector2(1f, 1f), new Vector2(-8f, -60f), new Vector2(128f, 44f), HudAssets.Button);
             Button introSkip = introSkipRoot.AddComponent<Button>();
             introSkip.targetGraphic = introSkipRoot.GetComponent<Image>();
             introSkip.onClick.AddListener(OnSkipIntro);
             introSkip.name = "Button_IntroSkip";
             FeelUiFeedback.AttachButton(introSkip);
-            Label("도착 연출 건너뛰기", introSkipRoot.transform, 10, Cream, FontStyle.Bold,
+            Label("도착 연출 건너뛰기", introSkipRoot.transform, HudStyle.BodySize, HudStyle.Text, FontStyle.Normal,
                 TextAnchor.MiddleCenter, new Vector2(4f, 0f), new Vector2(120f, 44f));
             introSkipRoot.SetActive(false);
+            ApplyResponsiveLayout(true);
         }
 
         void BuildLessonPicker()
         {
-            lessonPicker = Surface("GuidanceLessonPicker", expandedRoot.transform, Navy2, new Vector2(0f, 1f),
-                new Vector2(10f, -216f), new Vector2(640f, 142f));
+            lessonPicker = Surface("GuidanceLessonPicker", expandedRoot.transform, HudStyle.SurfaceRaised,
+                new Vector2(.5f, 1f), new Vector2(0f, 8f), new Vector2(640f, 378f));
+            lessonPickerRect = lessonPicker.GetComponent<RectTransform>();
+            lessonPickerRect.pivot = new Vector2(.5f, 0f);
+
+            Label("기능 목록", lessonPicker.transform, HudStyle.TitleSize, HudStyle.Text, FontStyle.Normal,
+                TextAnchor.MiddleLeft, new Vector2(10f, -4f), new Vector2(560f, HudStyle.TouchSize));
+            Button close = MakeButton("X", lessonPicker.transform, new Vector2(592f, -4f),
+                new Vector2(HudStyle.TouchSize, HudStyle.TouchSize), HudStyle.Surface, OnCloseLessonPicker);
+            close.name = "Button_GuidanceLessonsClose";
 
             GameObject viewport = new GameObject("GuidanceLessonViewport", typeof(RectTransform), typeof(RectMask2D));
             viewport.transform.SetParent(lessonPicker.transform, false);
@@ -252,20 +301,20 @@ namespace Riverworks
             viewportRect.anchorMin = Vector2.zero;
             viewportRect.anchorMax = Vector2.one;
             viewportRect.offsetMin = new Vector2(4f, 4f);
-            viewportRect.offsetMax = new Vector2(-4f, -4f);
+            viewportRect.offsetMax = new Vector2(-4f, -(HudStyle.TouchSize + 8f));
 
             GameObject content = new GameObject("GuidanceLessonContent", typeof(RectTransform));
             content.transform.SetParent(viewport.transform, false);
-            RectTransform contentRect = content.GetComponent<RectTransform>();
-            contentRect.anchorMin = new Vector2(0f, 1f);
-            contentRect.anchorMax = new Vector2(1f, 1f);
-            contentRect.pivot = new Vector2(.5f, 1f);
-            contentRect.anchoredPosition = Vector2.zero;
+            lessonContentRect = content.GetComponent<RectTransform>();
+            lessonContentRect.anchorMin = new Vector2(0f, 1f);
+            lessonContentRect.anchorMax = new Vector2(1f, 1f);
+            lessonContentRect.pivot = new Vector2(.5f, 1f);
+            lessonContentRect.anchoredPosition = Vector2.zero;
 
             int count = 0;
             foreach (GuidanceLessonDefinition ignored in GuidanceLessonCatalog.All) count++;
             int rows = Mathf.CeilToInt(count / 3f);
-            contentRect.sizeDelta = new Vector2(0f, rows * 46f + 2f);
+            lessonContentRect.sizeDelta = new Vector2(0f, rows * 46f + 2f);
 
             int index = 0;
             foreach (GuidanceLessonDefinition lesson in GuidanceLessonCatalog.All)
@@ -274,15 +323,17 @@ namespace Riverworks
                 int row = index / 3;
                 int column = index % 3;
                 Button button = MakeButton((index + 1) + ". " + lesson.Title, content.transform,
-                    new Vector2(2f + column * 210f, -2f - row * 46f), new Vector2(204f, 44f), Navy,
-                    () => OnLessonSelected(lessonId), 10);
+                    new Vector2(2f + column * 210f, -2f - row * 46f),
+                    new Vector2(204f, HudStyle.TouchSize), HudStyle.Surface,
+                    () => OnLessonSelected(lessonId));
                 button.name = "Button_GuidanceLesson_" + lesson.StableId;
+                lessonButtons.Add(button.GetComponent<RectTransform>());
                 index++;
             }
 
             ScrollRect scroll = lessonPicker.AddComponent<ScrollRect>();
             scroll.viewport = viewportRect;
-            scroll.content = contentRect;
+            scroll.content = lessonContentRect;
             scroll.horizontal = false;
             scroll.vertical = true;
             scroll.movementType = ScrollRect.MovementType.Clamped;
@@ -293,9 +344,10 @@ namespace Riverworks
 
         void BuildTopicButton(string label, string objectName, AdvisorTopic topic, float x)
         {
-            Button button = MakeButton(label, topicRow.transform, new Vector2(x, -2f), new Vector2(58f, 44f),
-                Navy, () => OnAdvice(topic), 12);
+            Button button = MakeButton(label, topicRow.transform, new Vector2(x, -2f),
+                new Vector2(126f, HudStyle.TouchSize), HudStyle.Surface, () => OnAdvice(topic));
             button.name = objectName;
+            topicButtons.Add(button.GetComponent<RectTransform>());
         }
 
         void Refresh(bool force)
@@ -316,6 +368,7 @@ namespace Riverworks
             if (obscured || intro)
             {
                 StopVoice();
+                CloseTransientMenus();
                 return;
             }
 
@@ -324,16 +377,22 @@ namespace Riverworks
             speakerText.text = string.IsNullOrEmpty(director.SpeakerName) ? "단우" : director.SpeakerName;
             titleText.text = string.IsNullOrEmpty(director.Title) ? (advice ? "단우의 마을 장부" : "첫걸음 안내") : director.Title;
             goalText.text = GoalLabel(director.GoalText, director.GoalSatisfied, advice);
-            goalText.color = director.GoalSatisfied ? Teal : Muted;
+            goalText.color = director.GoalSatisfied ? HudStyle.Positive : HudStyle.TextMuted;
 
             topicRow.SetActive(advice);
             lessonPicker.SetActive(advice && lessonPickerOpen);
-            expandedRect.sizeDelta = new Vector2(660f, advice ? (lessonPickerOpen ? 364f : 216f) : 156f);
             skipButton.gameObject.SetActive(!advice && !director.IsLessonMode && director.IsRunning);
             restartButton.gameObject.SetActive(advice && director.CanRestart);
+            guidanceLessonsButton.gameObject.SetActive(advice);
+            nextLessonButton.gameObject.SetActive(advice);
+            guidanceToggleText.transform.parent.gameObject.SetActive(advice);
+            if (!HasMoreActions()) morePopupOpen = false;
+            LayoutMoreActions();
+            SetActive(morePopup, expanded && morePopupOpen && HasMoreActions());
             nextLessonButton.interactable = director.HasEligibleLesson;
             followGuideButton.gameObject.SetActive(director.GuideAvailable);
             guidanceToggleText.text = director.GuidanceEnabled ? "기능 팁 끄기" : "기능 팁 켜기";
+            ApplyResponsiveLayout(false);
 
             if (advice)
             {
@@ -445,6 +504,7 @@ namespace Riverworks
 
         void OnAdvance()
         {
+            CloseTransientMenus();
             if (typing)
             {
                 RevealAll();
@@ -472,19 +532,21 @@ namespace Riverworks
         void OnCollapse()
         {
             StopVoice();
+            CloseTransientMenus();
             director.Collapse();
         }
 
         void OnSkip()
         {
             StopVoice();
+            CloseTransientMenus();
             director.Skip();
         }
 
         void OnRestart()
         {
             StopVoice();
-            lessonPickerOpen = false;
+            CloseTransientMenus();
             director.Restart();
         }
 
@@ -502,32 +564,53 @@ namespace Riverworks
         void OnNextLesson()
         {
             StopVoice();
-            lessonPickerOpen = false;
+            CloseTransientMenus();
             director.OpenNextLesson();
+        }
+
+        void OnToggleMorePopup()
+        {
+            if (!HasMoreActions()) return;
+            lessonPickerOpen = false;
+            morePopupOpen = !morePopupOpen;
+            SetActive(lessonPicker, false);
+            SetActive(morePopup, morePopupOpen);
+            LayoutMoreActions();
+            ApplyResponsiveLayout(false);
         }
 
         void OnToggleLessonPicker()
         {
             if (!director.IsAdviceMode) return;
             lessonPickerOpen = !lessonPickerOpen;
+            morePopupOpen = false;
+            SetActive(morePopup, false);
             lessonPicker.SetActive(lessonPickerOpen);
-            expandedRect.sizeDelta = new Vector2(660f, lessonPickerOpen ? 364f : 216f);
+            ApplyResponsiveLayout(false);
+        }
+
+        void OnCloseLessonPicker()
+        {
+            lessonPickerOpen = false;
+            SetActive(lessonPicker, false);
         }
 
         void OnLessonSelected(GuidanceLessonId lessonId)
         {
             StopVoice();
-            lessonPickerOpen = false;
+            CloseTransientMenus();
             director.OpenLesson(lessonId);
         }
 
         void OnToggleGuidance()
         {
+            CloseTransientMenus();
             director.SetGuidanceEnabled(!director.GuidanceEnabled);
         }
 
         void OnReopen()
         {
+            CloseTransientMenus();
             if (director.IsRunning || director.IsLessonMode) director.Reopen();
             else director.OpenGuide();
         }
@@ -535,8 +618,23 @@ namespace Riverworks
         void OnAdvice(AdvisorTopic topic)
         {
             StopVoice();
-            lessonPickerOpen = false;
+            CloseTransientMenus();
             director.AskAdvice(topic);
+        }
+
+        void CloseTransientMenus()
+        {
+            lessonPickerOpen = false;
+            morePopupOpen = false;
+            SetActive(lessonPicker, false);
+            SetActive(morePopup, false);
+        }
+
+        bool HasMoreActions()
+        {
+            return (skipButton != null && skipButton.gameObject.activeSelf) ||
+                   (restartButton != null && restartButton.gameObject.activeSelf) ||
+                   (guidanceLessonsButton != null && guidanceLessonsButton.gameObject.activeSelf);
         }
 
         void HandleKeyboardShortcut()
@@ -791,8 +889,153 @@ namespace Riverworks
             return value.Length <= 17 ? value : value.Substring(0, 16) + "…";
         }
 
+        void LayoutMoreActions()
+        {
+            if (morePopupRect == null) return;
+            float y = -4f;
+            PositionVisibleMenuButton(skipButton, ref y);
+            PositionVisibleMenuButton(restartButton, ref y);
+            PositionVisibleMenuButton(guidanceLessonsButton, ref y);
+            PositionVisibleMenuButton(nextLessonButton, ref y);
+            Button guidanceToggle = guidanceToggleText == null ? null : guidanceToggleText.GetComponentInParent<Button>();
+            PositionVisibleMenuButton(guidanceToggle, ref y);
+            morePopupRect.sizeDelta = new Vector2(224f, Mathf.Max(HudStyle.TouchSize + 8f, -y + 4f));
+            PositionMorePopup();
+        }
+
+        void PositionMorePopup()
+        {
+            if (morePopupRect == null || moreRect == null || expandedRect == null) return;
+            morePopupRect.anchoredPosition = new Vector2(-14f,
+                expandedRect.rect.height + moreRect.anchoredPosition.y + 8f);
+        }
+
+        static void PositionVisibleMenuButton(Button button, ref float y)
+        {
+            if (button == null || !button.gameObject.activeSelf) return;
+            RectTransform rect = button.GetComponent<RectTransform>();
+            rect.anchoredPosition = new Vector2(4f, y);
+            y -= HudStyle.TouchSize + 4f;
+        }
+
+        void ApplyResponsiveLayout(bool force)
+        {
+            if (expandedRect == null || visualParent == null) return;
+            RectTransform parentRect = visualParent as RectTransform;
+            float safeWidth = parentRect == null || parentRect.rect.width <= 0f
+                ? Mathf.Max(720f, Screen.safeArea.width)
+                : parentRect.rect.width;
+            float safeHeight = parentRect == null || parentRect.rect.height <= 0f
+                ? Mathf.Max(720f, Screen.safeArea.height)
+                : parentRect.rect.height;
+            float width = Mathf.Clamp(safeWidth - 16f, 480f, 680f);
+            Hud hud = visualParent.GetComponentInParent<Hud>();
+            bool constructionVisible = hud != null && hud.ConstructionBarVisible;
+            float constructionHeight = constructionVisible ? Mathf.Max(0f, hud.ConstructionBarHeight) : 0f;
+            bool advice = director != null && director.IsAdviceMode;
+            bool textGeometryChanged = force || Mathf.Abs(expandedRect.sizeDelta.x - width) > .01f;
+            bool geometryChanged = force || lastScreenWidth != Screen.width || lastScreenHeight != Screen.height ||
+                                   lastSafeArea != Screen.safeArea || Mathf.Abs(expandedRect.sizeDelta.x - width) > .01f ||
+                                   lastSafeSize != new Vector2(safeWidth, safeHeight) ||
+                                   advice != lastAdviceMode ||
+                                   constructionVisible != lastConstructionBarVisible ||
+                                   Mathf.Abs(constructionHeight - lastConstructionBarHeight) > .01f;
+            if (!geometryChanged) return;
+
+            lastScreenWidth = Screen.width;
+            lastScreenHeight = Screen.height;
+            lastSafeArea = Screen.safeArea;
+            lastSafeSize = new Vector2(safeWidth, safeHeight);
+            lastAdviceMode = advice;
+            lastConstructionBarVisible = constructionVisible;
+            lastConstructionBarHeight = constructionHeight;
+
+            expandedRect.sizeDelta = new Vector2(width, advice ? 230f : 174f);
+            float constructionOffset = constructionVisible ? constructionHeight + 8f : 0f;
+            expandedRect.anchoredPosition = new Vector2(0f, 68f + constructionOffset);
+
+            SetWidth(bodyHitRect, width - 28f);
+            SetWidth(bodyText == null ? null : bodyText.rectTransform, width - 48f);
+            SetPositionAndWidth(titleText == null ? null : titleText.rectTransform, 84f, width - 210f);
+            SetPositionAndWidth(pageIndicatorText == null ? null : pageIndicatorText.rectTransform, width - 110f, 92f);
+            SetPositionAndWidth(goalRect, 144f, Mathf.Max(120f, width - 398f));
+            SetX(advanceRect, width - 200f);
+            SetX(moreRect, width - 82f);
+            PositionMorePopup();
+
+            if (topicRect != null)
+            {
+                topicRect.sizeDelta = new Vector2(width - 20f, 48f);
+                float buttonWidth = (width - 44f) / 5f;
+                for (int i = 0; i < topicButtons.Count; i++)
+                {
+                    RectTransform rect = topicButtons[i];
+                    rect.anchoredPosition = new Vector2(4f + i * buttonWidth, -2f);
+                    SetButtonSize(rect, buttonWidth - 4f, HudStyle.TouchSize);
+                }
+            }
+
+            if (lessonPickerRect != null)
+            {
+                float pickerWidth = Mathf.Min(640f, width - 20f);
+                float dialogueTop = expandedRect.anchoredPosition.y + expandedRect.sizeDelta.y;
+                float availableAbove = Mathf.Max(0f, safeHeight - dialogueTop - 8f);
+                float pickerHeight = Mathf.Min(Mathf.Max(100f, availableAbove), Mathf.Min(378f, safeHeight - 16f));
+                lessonPickerRect.sizeDelta = new Vector2(pickerWidth, pickerHeight);
+                float pickerBottom = Mathf.Min(dialogueTop + 8f, safeHeight - pickerHeight - 8f);
+                lessonPickerRect.anchoredPosition = new Vector2(0f, pickerBottom - dialogueTop);
+                float cellWidth = (pickerWidth - 8f) / 3f;
+                Button close = lessonPickerRect.Find("Button_GuidanceLessonsClose") == null
+                    ? null
+                    : lessonPickerRect.Find("Button_GuidanceLessonsClose").GetComponent<Button>();
+                if (close != null) close.GetComponent<RectTransform>().anchoredPosition =
+                    new Vector2(pickerWidth - HudStyle.TouchSize - 4f, -4f);
+                Text pickerTitle = lessonPickerRect.GetComponentInChildren<Text>();
+                if (pickerTitle != null && pickerTitle.transform.parent == lessonPickerRect)
+                    pickerTitle.rectTransform.sizeDelta = new Vector2(
+                        Mathf.Max(1f, pickerWidth - HudStyle.TouchSize - 22f), HudStyle.TouchSize);
+                for (int i = 0; i < lessonButtons.Count; i++)
+                {
+                    int row = i / 3;
+                    int column = i % 3;
+                    RectTransform rect = lessonButtons[i];
+                    rect.anchoredPosition = new Vector2(2f + column * cellWidth, -2f - row * 46f);
+                    SetButtonSize(rect, cellWidth - 6f, HudStyle.TouchSize);
+                }
+            }
+
+            if (!force && textGeometryChanged && director != null && pages.Count > 0)
+                StartContent(director.Text ?? "", director.PageTexts, contentSignature);
+        }
+
+        static void SetWidth(RectTransform rect, float width)
+        {
+            if (rect == null) return;
+            rect.sizeDelta = new Vector2(Mathf.Max(1f, width), rect.sizeDelta.y);
+        }
+
+        static void SetPositionAndWidth(RectTransform rect, float x, float width)
+        {
+            if (rect == null) return;
+            rect.anchoredPosition = new Vector2(x, rect.anchoredPosition.y);
+            SetWidth(rect, width);
+        }
+
+        static void SetX(RectTransform rect, float x)
+        {
+            if (rect != null) rect.anchoredPosition = new Vector2(x, rect.anchoredPosition.y);
+        }
+
+        static void SetButtonSize(RectTransform rect, float width, float height)
+        {
+            if (rect == null) return;
+            rect.sizeDelta = new Vector2(Mathf.Max(1f, width), height);
+            Text label = rect.GetComponentInChildren<Text>();
+            if (label != null) label.rectTransform.sizeDelta = new Vector2(Mathf.Max(1f, width - 8f), height);
+        }
+
         Button MakeButton(string value, Transform parent, Vector2 position, Vector2 size, Color color,
-            UnityEngine.Events.UnityAction click, int textSize)
+            UnityEngine.Events.UnityAction click)
         {
             GameObject go = Surface("Button_" + value, parent, color, new Vector2(0f, 1f), position, size, HudAssets.Button);
             Button button = go.AddComponent<Button>();
@@ -804,7 +1047,7 @@ namespace Riverworks
             colors.disabledColor = new Color(.55f, .55f, .55f, .7f);
             button.colors = colors;
             button.onClick.AddListener(click);
-            Label(value, go.transform, textSize, Cream, FontStyle.Bold, TextAnchor.MiddleCenter,
+            Label(value, go.transform, HudStyle.BodySize, HudStyle.Foreground(color), FontStyle.Normal, TextAnchor.MiddleCenter,
                 new Vector2(4f, 0f), new Vector2(size.x - 8f, size.y));
             FeelUiFeedback.AttachButton(button);
             return button;
@@ -876,11 +1119,5 @@ namespace Riverworks
             else DestroyImmediate(target);
         }
 
-        static Color Hex(string value)
-        {
-            Color color;
-            ColorUtility.TryParseHtmlString("#" + value, out color);
-            return color;
-        }
     }
 }
