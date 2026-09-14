@@ -20,6 +20,7 @@ static class Check
             passed += CityLogisticsChecks.Run();
             passed += CityFactoryChecks.Run();
             passed += TechnologyGraphChecks.Run();
+            passed += ResearchGraphChecks.Run();
             Console.WriteLine($"\n전체 {passed}개 검증 통과"); return 0;
         }
         catch (Exception e) { Console.Error.WriteLine(e); return 1; }
