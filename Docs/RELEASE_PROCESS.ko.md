@@ -10,7 +10,7 @@
 - .NET 8 SDK와 Node.js 22 이상
 - GitHub CLI `gh` 로그인
 
-버전은 `Assets/Editor/BuildAutomation.cs`의 현재 Player 버전과 일치시킨다. 아래 예시는 `0.6.2`이다.
+버전은 `Assets/Editor/BuildAutomation.cs`의 현재 Player 버전과 일치시킨다. 아래 예시는 `0.7.0`이다.
 
 ## 1. 소스 계약 검사
 
@@ -34,7 +34,7 @@ Unity가 설치된 Windows 환경에서 빌드한다.
 빌드가 끝나면 다음 명령으로 실행 검사를 수행한다. `Tools/Build.ps1`은 기본적으로 작업 스레드 2개와 낮은 우선순위를 사용하며, 게임 실행 검사는 차례대로 진행한다.
 
 ```powershell
-.\Tools\Test.ps1 -Runtime -FactoryRuntime -CompactUiRuntime -FeelRuntime -TutorialRuntime -ResidentActivityRuntime
+.\Tools\Test.ps1 -Runtime -FactoryRuntime -CompactUiRuntime -FeelRuntime -TutorialRuntime -ResidentActivityRuntime -ResearchTreeRuntime
 ```
 
 주민 활동 검사는 `Artifacts\ResidentActivitySmoke\01-resident-activity-overview-1600x900.png`와 결과 파일을 만든다. 성공 결과와 새 스크린샷을 직접 확인한다. 검증 경계는 [VERIFICATION.md](VERIFICATION.md)에 기록한다.
@@ -44,23 +44,23 @@ Unity가 설치된 Windows 환경에서 빌드한다.
 기본 명령은 Windows 게임 ZIP과 선택형 주민 AI 게이트웨이 ZIP을 함께 만든다.
 
 ```powershell
-.\Tools\Package-Release.ps1 -Version 0.6.2
+.\Tools\Package-Release.ps1 -Version 0.7.0
 ```
 
 미리보기와 이번 빌드에서 새로 녹화한 영상 경로를 명시할 수도 있다.
 
 ```powershell
-.\Tools\Package-Release.ps1 -Version 0.6.2 `
+.\Tools\Package-Release.ps1 -Version 0.7.0 `
   -PreviewPath .\Docs\Images\riverworks-v0.6.png `
-  -MoviePath .\Artifacts\UiPolish\ui-polish.mp4
+  -MoviePath .\Artifacts\ResearchTree\research-tree.mp4
 ```
 
 출력:
 
-- `Builds\Riverworks-v0.6.2-Windows-x64.zip`
-- `Builds\Riverworks-v0.6.2-Windows-x64.zip.sha256`
-- `Builds\Riverworks-Resident-Gateway-v0.6.2.zip`
-- `Builds\Riverworks-Resident-Gateway-v0.6.2.zip.sha256`
+- `Builds\Riverworks-v0.7.0-Windows-x64.zip`
+- `Builds\Riverworks-v0.7.0-Windows-x64.zip.sha256`
+- `Builds\Riverworks-Resident-Gateway-v0.7.0.zip`
+- `Builds\Riverworks-Resident-Gateway-v0.7.0.zip.sha256`
 
 스크립트는 `Builds\.release-staging` 아래에 실행마다 새 검토 폴더를 만든다. Windows ZIP에는 Unity 실행 파일과 런타임 폴더, 사용자 문서, 원본 라이선스, provenance, 최신 미리보기만 명시적으로 넣는다. 게이트웨이 ZIP에는 `Server/src`, `package.json`, `start.ps1`, `.env.example`, 주민 AI 안내만 넣는다. 실제 `.env`, `.data`, 로그, 테스트, `node_modules`, 공급자 키는 포함하지 않는다.
 
@@ -70,8 +70,8 @@ Unity가 설치된 Windows 환경에서 빌드한다.
 
 ```powershell
 .\Tools\Verify-Release.ps1 `
-  -ZipPath .\Builds\Riverworks-v0.6.2-Windows-x64.zip `
-  -ExpectedVersion 0.6.2
+  -ZipPath .\Builds\Riverworks-v0.7.0-Windows-x64.zip `
+  -ExpectedVersion 0.7.0
 ```
 
 검증기는 필수 실행 파일, Unity 데이터, 문서, 라이선스, PNG 헤더, Player 버전, SHA-256 일치를 확인한다. 이어서 ZIP을 새 폴더에 풀고 `Riverworks.exe`를 직접 실행해 새 게임, 저장/불러오기, 튜토리얼, 주민 활동과 공장 작업을 확인한다. 외부 LLM 기능은 키를 사용자가 별도로 설정했을 때만 실제 연결 검증으로 기록한다.
@@ -81,13 +81,13 @@ Unity가 설치된 Windows 환경에서 빌드한다.
 테스트와 패키지 검증이 성공하고 변경 사항을 공개 저장소에 푸시한 뒤 실행한다.
 
 ```powershell
-gh release create v0.6.2 `
-  .\Builds\Riverworks-v0.6.2-Windows-x64.zip `
-  .\Builds\Riverworks-v0.6.2-Windows-x64.zip.sha256 `
-  .\Builds\Riverworks-Resident-Gateway-v0.6.2.zip `
-  .\Builds\Riverworks-Resident-Gateway-v0.6.2.zip.sha256 `
+gh release create v0.7.0 `
+  .\Builds\Riverworks-v0.7.0-Windows-x64.zip `
+  .\Builds\Riverworks-v0.7.0-Windows-x64.zip.sha256 `
+  .\Builds\Riverworks-Resident-Gateway-v0.7.0.zip `
+  .\Builds\Riverworks-Resident-Gateway-v0.7.0.zip.sha256 `
   --repo atozuser0224/riverworks-city `
-  --title "Riverworks v0.6.2" `
+  --title "Riverworks v0.7.0" `
   --generate-notes
 ```
 

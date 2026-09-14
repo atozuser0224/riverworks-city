@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version = '0.6.2',
+    [string]$Version = '0.7.0',
 
     [string]$WindowsBuildPath,
 
@@ -148,6 +148,8 @@ $documentMap = [ordered]@{
     'RESIDENT_VISUALS.ko.md' = 'Docs\RESIDENT_VISUALS.ko.md'
     'VERIFICATION.md' = 'Docs\VERIFICATION.md'
     'UI_POLISH.ko.md' = 'Docs\UI_POLISH.ko.md'
+    'RESEARCH_TREE.ko.md' = 'Docs\RESEARCH_TREE.ko.md'
+    'Images\research-tree-v0.7.png' = 'Docs\Images\research-tree-v0.7.png'
     'Images\research-v0.6.2.png' = 'Docs\Images\research-v0.6.2.png'
     'Images\guidance-v0.6.2.png' = 'Docs\Images\guidance-v0.6.2.png'
     'ATTRIBUTION.md' = 'Assets\Resources\Fonts\ATTRIBUTION.md'

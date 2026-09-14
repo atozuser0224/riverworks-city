@@ -8,7 +8,7 @@ RIVERWORKS v0.6은 Unity 6000.5.5f1 기반 단일 플레이어 공유 도시 프
 
 주민의 기본 일과와 단우 안내는 로컬 규칙으로 동작합니다. 별도의 `ResidentAiClient`와 `Server/` 게이트웨이는 OpenRouter 모델이 제안한 제한된 방문 계획을 선택적으로 적용합니다. 모델이 건설·경제·생산 상태를 직접 바꾸는 API는 없으며, 연결되지 않았거나 검증에 실패하면 `CitizenSimulation`의 기존 일과를 계속 사용합니다.
 
-현재 v0.6 Windows 빌드와 도시·통합 물류·컴팩트 UI·튜토리얼·Feel·주민 AI 계약 런타임 검사의 GUID는 `6438d35a7cc847fe83ab317eef8dd5a7`입니다. 주민 AI 검사는 실제 제공자 호출이 없는 `MOCK_CONTRACT`이고, 유효한 OpenRouter 키가 없어 `LIVE_OPENROUTER`는 실행하지 못했습니다. v0.6 Android APK 생성과 실제 기기 설치·터치·성능도 아직 완료되지 않았습니다. 세부 결과는 [검증 기록](VERIFICATION.md)에 있습니다.
+현재 v0.6 Windows 빌드와 도시·통합 물류·컴팩트 UI·튜토리얼·Feel·주민 AI 계약 런타임 검사의 GUID는 `36c52483354e4e2f90acc0c0422bcb64`입니다. 주민 AI 검사는 실제 제공자 호출이 없는 `MOCK_CONTRACT`이고, 유효한 OpenRouter 키가 없어 `LIVE_OPENROUTER`는 실행하지 못했습니다. v0.6 Android APK 생성과 실제 기기 설치·터치·성능도 아직 완료되지 않았습니다. 세부 결과는 [검증 기록](VERIFICATION.md)에 있습니다.
 
 ## 실행 객체 그래프
 
@@ -347,22 +347,28 @@ dotnet run --project .\Tests\Riverworks.Tests.csproj -c Release
 
 `CityLogisticsChecks`와 `CityFactoryChecks`는 42×42 기하, 양방향 점유, 도로·벨트 공존, 도시 바위, 물 교량, 생산·가공 버퍼, 시청·도시 창고·시장 인계, 역압, 전력·반출 연결과 v3→v4 보존을 다룹니다. `SharedCityScenario`와 `SharedCitySmokeTest`는 Unity 런타임에서 단일 보드·카메라·HUD·주민 유지, 실제 이동 화물과 저장 왕복을 검사합니다.
 
-현재 기록된 v0.6.2 결과는 다음과 같습니다.
+현재 기록된 v0.7.0 결과는 다음과 같습니다.
 
 | 검증 계층 | 결과 |
 |---|---:|
-| 순수 C# 코어 | 695개 PASS |
-| `RuntimeSmokeTest` 도시 | 61개 PASS |
+| 순수 C# 코어 | 715개 PASS |
+| `RuntimeSmokeTest` 도시 | 155개 PASS |
 | `SharedCitySmokeTest` | 106개 PASS |
-| `CompactHudSmokeTest` | 779개 PASS |
-| `TutorialSmokeTest` | 2,465개 PASS |
+| `CompactHudSmokeTest` | 1,087개 PASS |
+| ResearchTreeSmokeTest | 1,081개 PASS |
+| TutorialSmokeTest | 2,465개 PASS |
 | `FeelSmokeTest` | 180개 PASS |
 | `ResidentAiSmokeTest` | 160개 PASS, `MOCK_CONTRACT`, 실제 제공자 호출 없음 |
 
-모든 Windows 런타임 결과는 빌드 GUID `6438d35a7cc847fe83ab317eef8dd5a7`에서 오류 없이 종료됐습니다. `FeelSmokeTest`는 실제 `MMF_Player`, 시청 근접 줌, 수동 카메라 취소와 기준 변환 복원을 포함하고, `TutorialSmokeTest`는 11단계·19개 기능 안내, 실제 단우 도로 이동, 카메라 추적, 초상화 부재와 저장 경계를 포함합니다.
+모든 Windows 런타임 결과는 빌드 GUID `36c52483354e4e2f90acc0c0422bcb64`에서 오류 없이 종료됐습니다. `FeelSmokeTest`는 실제 `MMF_Player`, 시청 근접 줌, 수동 카메라 취소와 기준 변환 복원을 포함하고, `TutorialSmokeTest`는 11단계·19개 기능 안내, 실제 단우 도로 이동, 카메라 추적, 초상화 부재와 저장 경계를 포함합니다.
 
 순수 테스트와 Windows 런타임 통과는 Android 또는 외부 제공자 검증을 뜻하지 않습니다. v0.6 Android APK 생성·서명·구성 검사와 실제 기기 설치·터치·성능은 아직 완료되지 않았습니다. 주민 AI도 로컬 계약 서버까지만 확인했으며 실제 `LIVE_OPENROUTER` 호출은 이번 검사에서 실행하지 않았습니다. 최신 [검증 기록](VERIFICATION.md)의 실제 산출물 보고를 기준으로 상태를 판단해야 합니다.
 
 ## 현재 범위
 
 주민은 개별 경제 주체가 아니며 LLM 계획도 방문 목적과 짧은 생각·기분·세션 기억만 제안합니다. 교통 혼잡, 주민별 자산·거래, 장기 AI 기억, 차량별 화물, 멀티플레이와 모딩은 포함하지 않습니다. 산업 물류는 단일 화물 벨트와 투입기 중심이며 유체, 지하 벨트, 기차와 전투는 포함하지 않습니다. 예전 24×16 공장 보관본은 기록과 가치 보존을 위한 마이그레이션 자료이며 플레이 공간이 아닙니다.
+
+
+## v0.7 연결형 연구 지도
+
+ResearchGraph는 카탈로그의 18개 기술과 19개 선행 관계를 검증하고 조상·후속·잔여 연구 계획을 계산합니다. ResearchTreeLayout은 위상 깊이에 맞는 고정 노드와 카드 사이 통로의 연결선을 배치합니다. ResearchTreeView와 ResearchConnectionGraphic은 지도·선택·검색·이동·정수 확대를, ResearchDetailPanel은 실제 효과와 비용·해금·선행 경로를 보여 줍니다. 게임 시뮬레이션과 v4 저장 필드는 그대로입니다.
