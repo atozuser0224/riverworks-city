@@ -1,0 +1,38 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e19a32613b174a6f9fa67ac43ea684dd, type: 3}
+  m_Name: ResidentVisualLibrary
+  m_EditorClassIdentifier: Assembly-CSharp::Riverworks.ResidentVisualLibrary
+  Models:
+  - {fileID: 4428376243923496367, guid: 9af8441d59ad17b48a0663e18e13089a, type: 3}
+  - {fileID: 2941600845979046267, guid: 07a20a90cff96a948ac38d9397ca2e6c, type: 3}
+  - {fileID: 1740391002389564077, guid: 9d728c3085ec3f043adea20019dd8d4c, type: 3}
+  - {fileID: 6296504422705815837, guid: 143149e61b9697044a45f8a904f13e96, type: 3}
+  GuideModel: {fileID: 5131044951356194697, guid: bcf88ff2e72cc1b4db00fec50f0f0907, type: 3}
+  Idle: {fileID: 7994627924475153551, guid: 5b6f688315e93c14bb61ba8e0ef363e1, type: 3}
+  Walk: {fileID: -7003542030617561338, guid: 5b6f688315e93c14bb61ba8e0ef363e1, type: 3}
+  Carry: {fileID: 4786625530542965921, guid: 727abb587bf7ef74992f536e7a98a610, type: 3}
+  Chop: {fileID: 2903320853443471174, guid: 727abb587bf7ef74992f536e7a98a610, type: 3}
+  Dig: {fileID: 2903320853443471174, guid: 727abb587bf7ef74992f536e7a98a610, type: 3}
+  Farm: {fileID: -2760357578015435623, guid: 727abb587bf7ef74992f536e7a98a610, type: 3}
+  Knead: {fileID: 0}
+  Hammer: {fileID: 0}
+  Read: {fileID: 0}
+  Talk: {fileID: 6476497563760123848, guid: 5b6f688315e93c14bb61ba8e0ef363e1, type: 3}
+  Operate: {fileID: 0}
+  Sit: {fileID: -6676812269523803463, guid: 5b6f688315e93c14bb61ba8e0ef363e1, type: 3}
+  ModelHeights:
+  - 3.2751808
+  - 3.365416
+  - 3.2840462
+  - 3.1581903
+  GuideHeight: 3.2840462

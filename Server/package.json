@@ -1,0 +1,18 @@
+{
+  "name": "riverworks-resident-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "src/",
+    "start.ps1",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test --test-concurrency=1 test/gateway.test.js"
+  }
+}

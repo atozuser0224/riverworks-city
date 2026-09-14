@@ -1,0 +1,25 @@
+# RIVERWORKS integration contract
+
+> 초기 구현을 위한 설계 기록입니다. 현재 동작과 검증 상태는 [아키텍처](ARCHITECTURE.md)와 [검증 기록](VERIFICATION.md)을 확인하세요.
+
+Unity namespace: `Riverworks`. Plain C# core, no Unity references.
+
+## Core public API (owned by simulation agent)
+Enums: `Resource { Coins, Timber, Stone, Grain, Flour, Bread, Ore, Steel, Tools }`; `BuildingKind { None, TownHall, Road, House, Lumberyard, Quarry, Farm, Mill, Bakery, Mine, Smelter, Workshop, Windmill, Park, Warehouse, Market }`; `TerrainKind { Grass, Forest, Rock, Water }`.
+
+`[Serializable] Cell`: public int X,Z; TerrainKind Terrain; BuildingKind Building; int Level; bool Connected; float Progress; string Status. Map cells indexed z*Size+x. Default level=1 for built structures. No Unity types.
+`[Serializable] GameState`: public int Version=1, Size=21, Day, Population, Happiness; public float Coins; public List<float> Stock (all Resource indexes including Coins, but Coins source of truth is Coins field); public List<Cell> Cells; public List<int> OwnedRegions; public int Milestone; public float TotalProduced; public bool Won. Public static GameState CreateNew(). Region id=(z/7)*3+x/7. Initial region id=4, TownHall at (10,10). Meaningful seed settlement and resources.
+`BuildingSpec`: public BuildingKind Kind; public string Name, Description, Category; public int Cost, TimberCost, StoneCost, UnlockPopulation; public Resource Output; public float OutputAmount; public Dictionary<Resource,float> Inputs. `Catalog.Get(BuildingKind)`, `Catalog.All` enumerable specs, `Catalog.ResourceName(Resource)`.
+`Simulation`: constructor(GameState), public GameState State; public event Action<string> OnNotice; public float LastIncome; public int ConnectedBuildings, PowerCapacity, PowerUsed; public string ObjectiveTitle, ObjectiveDescription; public float ObjectiveProgress. Methods: `Cell GetCell(int x,int z)`, `float Get(Resource)`, `bool IsOwned(int x,int z)`, `bool CanBuild(BuildingKind,int x,int z,out string reason)`, `bool Build(BuildingKind,int x,int z,out string reason)`, `bool Demolish(int x,int z,out string reason)`, `bool Upgrade(int x,int z,out string reason)`, `bool BuyRegion(int regionId,out string reason)`, `int RegionCost(int regionId)`, `void Tick()`, `void Recalculate()`.
+Construction on owned non-water empty tiles, roads support replacement? Prefer no replacement. Forest/rock may be built over; lumber/quarry gain proximity productivity. Road adjacency + road BFS to TownHall required for production and houses; diagnostics in Cell.Status. Terrain resource restrictions and population gates in CanBuild, explain Korean reason. Upgrades cap3 and costs in reason/status. No operation can silently spend on failure. Region purchase adjacent to owned region, all 9 available, costs scale. House consumption and growth, production chains, utilities, taxes, upkeep, milestones, notices. Softlock-free starter money and supply, import trading or affordable emergency supplies.
+
+## Runtime/controller API (owned by root)
+`GameController : MonoBehaviour` exposes `public Simulation Sim`, `public GameState State => Sim.State`, `public BuildingKind SelectedTool`, `public Cell SelectedCell`, `public bool DemolitionMode`, `public float GameSpeed` (0/1/3), `public bool HelpOpen`, `public string Notice`, `public event Action Changed`.
+Methods public: `SelectTool(BuildingKind)`, `SelectDemolish()`, `SetSpeed(float)`, `SaveGame()`, `LoadGame()`, `NewGame()`, `BuyRegion(int)`, `UpgradeSelected()`, `Trade(Resource,bool buy)`, `ToggleHelp()`, `SetNotice(string)`; `bool IsPointerOverUI()`.
+UI calls controller only for mutations. `Hud : MonoBehaviour` with `void Initialize(GameController controller)` creates polished scalable uGUI overlay. No scene dependencies. Use dynamic Windows Korean font (Malgun Gothic), fallback legacy font. `Changed` event may be frequent; don't rebuild entire canvas on each tick. Hud destroy unsubscribes.
+
+## Presentation API (owned by visuals agent)
+`static class BuildingVisuals` public `GameObject Create(BuildingKind kind, Transform parent, int level=1)` creates a building local center at (0,0,0), facing -Z, footprint <=0.85 x0.85, heights 0.1-1.8. Uses owned primitive meshes/materials only, no external packages. Procedural meshes okay. `GameObject CreateTree(Transform parent, int seed=0)`; `GameObject CreateRock(Transform parent,int seed=0)`. Ground at y=0, positive above ground. Roads visuals handled root. Stylized model village, ivory walls, terracotta/coral roofs, brass small details, mint trees, smoked indigo industrial roofs. Polished silhouettes per building, windows, rooftop details. Disable/remove all mesh colliders so root cell ground raycast wins. Optional animations as component.
+
+## Ownership
+simulation agent: Assets/Scripts/Core/**, Tests/**. visuals agent: Assets/Scripts/Presentation/BuildingVisuals.cs and visual-only helper files. HUD agent: Assets/Scripts/UI/**. Root: runtime, map, camera, audio, editor build, scenes, settings, integration, docs and verification. Do not modify another owner's files before coordinating.
