@@ -47,6 +47,15 @@ namespace Riverworks
         private readonly List<RaycastResult> uiHits = new List<RaycastResult>();
         public bool CanPanWithRight => rightWorldGesture && rightHasDragged && Input.GetMouseButton(1);
         public bool CanPanWithMiddle => middleWorldGesture && Input.GetMouseButton(2);
+        public bool UiTextInputFocused
+        {
+            get
+            {
+                GameObject selected = EventSystem.current == null ? null : EventSystem.current.currentSelectedGameObject;
+                UnityEngine.UI.InputField input = selected == null ? null : selected.GetComponent<UnityEngine.UI.InputField>();
+                return input != null && input.isFocused;
+            }
+        }
         private Soundscape sounds;
         public const float SecondsPerDay = 5f;
 
@@ -58,8 +67,9 @@ namespace Riverworks
             bool residentAiSmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-resident-ai-smoke")>=0;
             bool residentActivitySmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-resident-activity-smoke")>=0;
             bool compactUiSmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-compact-ui-smoke")>=0;
+            bool researchTreeSmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-research-tree-smoke")>=0;
             bool factorySmoke=Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-factory-smoke")>=0 || Array.IndexOf(Environment.GetCommandLineArgs(),"-riverworks-shared-city-smoke")>=0;
-            SmokeMode = residentActivitySmoke || residentAiSmoke || tutorialSmoke || feelSmoke || compactUiSmoke || factorySmoke || Array.IndexOf(Environment.GetCommandLineArgs(), "-riverworks-smoke") >= 0;
+            SmokeMode = researchTreeSmoke || residentActivitySmoke || residentAiSmoke || tutorialSmoke || feelSmoke || compactUiSmoke || factorySmoke || Array.IndexOf(Environment.GetCommandLineArgs(), "-riverworks-smoke") >= 0;
             SavePath = SmokeMode ? Path.Combine(Application.persistentDataPath, "smoke-test.json") : Path.Combine(Application.persistentDataPath, "city-v1.json");
             var initial = GameState.CreateNew();
             if (!SmokeMode && (File.Exists(SavePath) || File.Exists(SavePath + ".bak")))
@@ -107,7 +117,8 @@ namespace Riverworks
             Tutorial=gameObject.AddComponent<TutorialDirector>();Tutorial.Initialize(this);
             ResidentAi=gameObject.AddComponent<ResidentAiClient>();ResidentAi.Initialize(this);
             if(SmokeMode)AudioListener.volume=0f;
-            if(residentActivitySmoke)gameObject.AddComponent<ResidentActivitySmokeTest>().Initialize(this);
+            if(researchTreeSmoke)gameObject.AddComponent<ResearchTreeSmokeTest>().Initialize(this);
+            else if(residentActivitySmoke)gameObject.AddComponent<ResidentActivitySmokeTest>().Initialize(this);
             else if(residentAiSmoke)gameObject.AddComponent<ResidentAiSmokeTest>().Initialize(this);
             else if(tutorialSmoke)gameObject.AddComponent<TutorialSmokeTest>().Initialize(this);
             else if(feelSmoke)gameObject.AddComponent<FeelSmokeTest>().Initialize(this);
@@ -169,7 +180,7 @@ namespace Riverworks
                 else { SelectedTool = BuildingKind.None; DemolitionMode = false; Factory?.Close(); Changed?.Invoke(); }
                 ClearGestures(); return;
             }
-            if (ModalOpen) { ClearGestures(); return; }
+            if (UiTextInputFocused || ModalOpen) { ClearGestures(); return; }
             if (Input.GetKeyDown(KeyCode.F1)) ToggleHelp();
             if (Input.GetKeyDown(KeyCode.T)) ToggleResearch();
             if(Input.GetKeyDown(KeyCode.G))

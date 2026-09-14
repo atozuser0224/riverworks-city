@@ -10,13 +10,8 @@ namespace Riverworks
     {
         readonly Dictionary<Resource, Button> modalSellButtons = new Dictionary<Resource, Button>();
         readonly Dictionary<Resource, Text> modalTradeHoldingLabels = new Dictionary<Resource, Text>();
-        readonly Dictionary<Era, RectTransform> modalResearchContents = new Dictionary<Era, RectTransform>();
-        readonly Dictionary<Era, List<TechId>> modalResearchCardsByEra = new Dictionary<Era, List<TechId>>();
-        readonly Dictionary<TechId, RectTransform> modalResearchTitles = new Dictionary<TechId, RectTransform>();
-        readonly Dictionary<TechId, RectTransform> modalResearchBadges = new Dictionary<TechId, RectTransform>();
         readonly Dictionary<RectTransform, Vector2> modalScrollableBodies = new Dictionary<RectTransform, Vector2>();
         RectTransform modalHelpWindow, modalMenuWindow, modalOverviewWindow, modalTerritoryWindow, modalTradeWindow, modalConfirmWindow;
-        RectTransform modalResearchEraViewport, modalResearchEraStrip;
         RectTransform modalFactoryBodyContent;
         Text modalTradeCoins;
         int modalLayoutWidth = -1, modalLayoutHeight = -1;
@@ -186,219 +181,34 @@ namespace Riverworks
 
         void BuildResearchOverlay()
         {
-            researchButtons.Clear();
-            researchCardTexts.Clear();
-            researchStatusTexts.Clear();
-            researchCardImages.Clear();
-            researchCardRects.Clear();
-            researchViewports.Clear();
-            modalResearchContents.Clear();
-            modalResearchCardsByEra.Clear();
-            modalResearchTitles.Clear();modalResearchBadges.Clear();
-
-            researchOverlay=Overlay("ResearchOverlay");
-            Vector2 windowSize=new Vector2(1180,640);
-            GameObject card=ModalCard("ResearchCard","도시 기술 연구",windowSize,"Button_ResearchClose",()=>controller.ToggleResearch());
-            researchWindow=card.GetComponent<RectTransform>();
-            Text intro=LabelAt("시대별 열을 위아래로 스크롤하세요. 선행 기술에서 다음 기술로 이어지는 경로를 카드에서 확인할 수 있습니다.",card.transform,HudStyle.BodySize,HudStyle.TextMuted,FontStyle.Normal,new Vector2(28,-54),new Vector2(windowSize.x-210,24));
-            intro.alignment=TextAnchor.MiddleLeft;
-
-            List<TechSpec> specs=TechCatalog.All.Where(spec=>spec!=null).ToList();
-            List<Era> eras=specs.Select(spec=>spec.Era).Distinct().OrderBy(era=>(int)era).ToList();
-            float side=24f;
-            float gap=14f;
-            float columnHeight=windowSize.y-102f;
-            GameObject eraViewport=new GameObject("ResearchEraViewport",typeof(RectTransform),typeof(Image),typeof(RectMask2D),typeof(ScrollRect));
-            eraViewport.transform.SetParent(card.transform,false);
-            Rect(eraViewport,new Vector2(0,0),new Vector2(1,1),new Vector2(side,68),new Vector2(-side,-88));
-            Image eraViewportImage=eraViewport.GetComponent<Image>();eraViewportImage.color=new Color(0,0,0,0);eraViewportImage.raycastTarget=true;
-            modalResearchEraViewport=eraViewport.GetComponent<RectTransform>();
-            GameObject eraStrip=new GameObject("ResearchEraStrip",typeof(RectTransform));eraStrip.transform.SetParent(eraViewport.transform,false);
-            modalResearchEraStrip=eraStrip.GetComponent<RectTransform>();modalResearchEraStrip.anchorMin=new Vector2(0,0);modalResearchEraStrip.anchorMax=new Vector2(1,1);modalResearchEraStrip.offsetMin=modalResearchEraStrip.offsetMax=Vector2.zero;
-            ScrollRect eraScroll=eraViewport.GetComponent<ScrollRect>();eraScroll.viewport=modalResearchEraViewport;eraScroll.content=modalResearchEraStrip;eraScroll.horizontal=true;eraScroll.vertical=false;eraScroll.movementType=ScrollRect.MovementType.Clamped;eraScroll.scrollSensitivity=42;
-            for(int col=0;col<eras.Count;col++)
-            {
-                Era era=eras[col];
-                List<TechSpec> eraSpecs=specs.Where(spec=>spec.Era==era).OrderBy(spec=>InitialResearchOrder(spec.Id)).ThenBy(spec=>specs.IndexOf(spec)).ToList();
-                float min=(float)col/Mathf.Max(1,eras.Count),max=(float)(col+1)/Mathf.Max(1,eras.Count);
-                GameObject column=Box("ResearchEra_"+era,modalResearchEraStrip,Vector2.zero,Vector2.zero,HudStyle.SurfaceRaised,new Vector2(0,1));
-                RectTransform columnRect=column.GetComponent<RectTransform>();
-                Rect(column,new Vector2(min,0),new Vector2(max,1),new Vector2(col==0?0:gap*.5f,0),new Vector2(-(col==eras.Count-1?0:gap*.5f),0));
-                float columnWidth=(windowSize.x-side*2-gap*Mathf.Max(0,eras.Count-1))/Mathf.Max(1,eras.Count);
-                Text eraHeading=LabelAt(TechCatalog.EraName(era),column.transform,HudStyle.BodySize,HudStyle.Text,FontStyle.Normal,new Vector2(12,-10),new Vector2(columnWidth-24,24));
-                Rect(eraHeading.gameObject,new Vector2(0,1),new Vector2(1,1),new Vector2(12,-34),new Vector2(-156,-10));
-                Text countLabel=LabelAt(eraSpecs.Count+"개 · 세로 스크롤",column.transform,HudStyle.BodySize,HudStyle.TextMuted,FontStyle.Normal,new Vector2(columnWidth-152,-12),new Vector2(140,20));
-                countLabel.alignment=TextAnchor.UpperRight;
-                Rect(countLabel.gameObject,new Vector2(1,1),new Vector2(1,1),new Vector2(-152,-12),new Vector2(140,20));
-
-                GameObject viewport=new GameObject("ResearchScroll_"+era,typeof(RectTransform),typeof(Image),typeof(RectMask2D),typeof(ScrollRect));
-                viewport.transform.SetParent(column.transform,false);
-                Rect(viewport,new Vector2(0,1),new Vector2(0,1),new Vector2(8,-42),new Vector2(columnWidth-16,columnHeight-50));
-                Image viewportImage=viewport.GetComponent<Image>();
-                viewportImage.color=new Color(0,0,0,0);
-                viewportImage.raycastTarget=true;
-                RectTransform viewportRect=viewport.GetComponent<RectTransform>();
-                viewportRect.pivot=new Vector2(0,1);
-                researchViewports[era]=viewportRect;
-                modalResearchCardsByEra[era]=eraSpecs.Select(spec=>spec.Id).ToList();
-
-                const float cardHeight=202f;
-                const float cardGap=10f;
-                float contentHeight=Mathf.Max(viewportRect.sizeDelta.y,eraSpecs.Count*(cardHeight+cardGap)-cardGap);
-                GameObject content=new GameObject("ResearchContent_"+era,typeof(RectTransform));
-                content.transform.SetParent(viewport.transform,false);
-                RectTransform contentRect=content.GetComponent<RectTransform>();
-                contentRect.anchorMin=new Vector2(0,1);
-                contentRect.anchorMax=new Vector2(1,1);
-                contentRect.pivot=new Vector2(.5f,1);
-                contentRect.anchoredPosition=Vector2.zero;
-                contentRect.sizeDelta=new Vector2(0,contentHeight);
-                modalResearchContents[era]=contentRect;
-
-                ScrollRect scroll=viewport.GetComponent<ScrollRect>();
-                scroll.viewport=viewportRect;
-                scroll.content=contentRect;
-                scroll.horizontal=false;
-                scroll.vertical=true;
-                scroll.movementType=ScrollRect.MovementType.Clamped;
-                scroll.inertia=true;
-                scroll.decelerationRate=.12f;
-                scroll.scrollSensitivity=34f;
-
-                for(int row=0;row<eraSpecs.Count;row++)
-                    BuildResearchCard(content.transform,eraSpecs[row],new Vector2(0,-row*(cardHeight+cardGap)),new Vector2(columnWidth-16,cardHeight));
-            }
+            researchOverlay = Overlay("ResearchOverlay");
+            GameObject card = ModalCard("ResearchCard", "기술 연구 · 도시의 발전", new Vector2(1248, 592),
+                "Button_ResearchClose", () => controller.ToggleResearch());
+            researchWindow = card.GetComponent<RectTransform>();
+            RectTransform body = ResearchUi.Rect("ResearchTree", card.transform);
+            ResearchUi.Stretch(body, 16, 64, 16, 12);
+            ResearchTree = body.gameObject.AddComponent<ResearchTreeView>();
+            ResearchTree.Initialize(controller);
             FeelUiFeedback.AttachPanel(card);
             researchOverlay.SetActive(false);
-            RefreshModalLayouts();
-        }
-
-        void BuildResearchCard(Transform parent, TechSpec spec, Vector2 pos, Vector2 size)
-        {
-            TechId id=spec.Id;
-            GameObject card=Box("TechCard_"+id,parent,pos,size,new Color(HudStyle.Surface.r,HudStyle.Surface.g,HudStyle.Surface.b,.98f),new Vector2(0,1));
-            researchCardImages[id]=card.GetComponent<Image>();
-            researchCardRects[id]=card.GetComponent<RectTransform>();
-            Text title=LabelAt(spec.Name,card.transform,HudStyle.BodySize,HudStyle.Text,FontStyle.Normal,new Vector2(12,-10),new Vector2(size.x-132,26));
-            modalResearchTitles[id]=title.rectTransform;
-            title.verticalOverflow=VerticalWrapMode.Overflow;
-            GameObject badge=Box("TechStatus_"+id,card.transform,new Vector2(size.x-112,-10),new Vector2(100,24),HudStyle.SurfaceRaised,new Vector2(0,1));
-            modalResearchBadges[id]=badge.GetComponent<RectTransform>();
-            Text status=Label("",badge.transform,HudStyle.BodySize,HudStyle.Text,FontStyle.Normal,TextAnchor.MiddleCenter);
-            Rect(status.gameObject,Vector2.zero,Vector2.one,new Vector2(4,1),new Vector2(-4,-1));
-            status.alignment=TextAnchor.MiddleCenter;
-            researchStatusTexts[id]=status;
-            Text details=LabelAt("",card.transform,HudStyle.BodySize,HudStyle.Text,FontStyle.Normal,new Vector2(12,-40),new Vector2(size.x-24,116));
-            details.gameObject.name="TechEffect_"+id;
-            details.alignment=TextAnchor.UpperLeft;
-            Button button=MakeButton("연구 시작_"+id,card.transform,new Vector2(12,-154),new Vector2(size.x-24,44),HudStyle.SurfaceRaised,()=>controller.Research(id),new Vector2(0,1),HudStyle.BodySize);
-            button.name="Button_연구 시작_"+id;
-            button.GetComponentInChildren<Text>().text="연구 시작";
-            researchCardTexts[id]=details;
-            researchButtons[id]=button;
-        }
-
-        static int InitialResearchOrder(TechId id)
-        {
-            if(id==TechId.Stonecraft)return -2;
-            if(id==TechId.CropRotation)return -1;
-            return 0;
         }
 
         void RefreshResearch()
         {
-            GameState s=controller.State;
-            eraText.text=TechCatalog.EraName(s.Era)+" · 지식 "+Mathf.FloorToInt(s.ResearchPoints)+"점";
-            if(s.ActiveResearch==TechId.None)
+            GameState state = controller.State;
+            eraText.text = TechCatalog.EraName(state.Era) + " · 지식 " + Mathf.FloorToInt(state.ResearchPoints) + "점";
+            if (state.ActiveResearch == TechId.None)
             {
-                int ready=TechCatalog.All.Count(t=>{string reason;return controller.Sim.CanResearch(t.Id,out reason);});
-                researchSummaryText.text="가능 "+ready+" · +"+controller.Sim.ResearchPerDay.ToString("0.#")+"/일";
+                int available = TechCatalog.All.Count(spec => controller.Sim.CanResearch(spec.Id, out _));
+                researchSummaryText.text = "가능 " + available + " · +" + controller.Sim.ResearchPerDay.ToString("0.#") + "/일";
             }
             else
             {
-                TechSpec active=TechCatalog.Get(s.ActiveResearch);
-                researchSummaryText.text=active.Name+" "+Mathf.RoundToInt(controller.Sim.ResearchProgress*100f)+"%";
+                TechSpec active = TechCatalog.Get(state.ActiveResearch);
+                researchSummaryText.text = active.Name + " " + Mathf.RoundToInt(controller.Sim.ResearchProgress * 100) + "%";
             }
-            foreach(var pair in researchCardTexts)
-            {
-                TechSpec spec=TechCatalog.Get(pair.Key);
-                if(spec==null)continue;
-                bool completed=TechCatalog.Has(s,pair.Key);
-                bool active=s.ActiveResearch==pair.Key;
-                string prerequisites=spec.Prerequisites==null||spec.Prerequisites.Length==0?"없음":string.Join(" + ",spec.Prerequisites.Select(p=>{TechSpec prerequisite=TechCatalog.Get(p);return prerequisite==null?p.ToString():prerequisite.Name;}));
-                string unlocks=spec.UnlockBuildings==null||spec.UnlockBuildings.Length==0?"":string.Join(", ",spec.UnlockBuildings.Select(b=>{BuildingSpec building=Catalog.Get(b);return building==null?b.ToString():building.Name;}));
-                string benefits=string.IsNullOrEmpty(spec.Benefit)?"없음":spec.Benefit;
-                if(!string.IsNullOrEmpty(unlocks))benefits+=" · 시설: "+unlocks;
-                pair.Value.text=completed?"효과 · "+CompletedBenefitSummary(spec):spec.Description+"\n선행 → "+prerequisites+"\n지식 "+spec.ResearchCost+" · "+spec.CoinCost+"G · "+spec.DurationDays+"일\n효과: "+benefits;
-                Button button=researchButtons[pair.Key];
-                string reason;
-                bool can=controller.Sim.CanResearch(pair.Key,out reason);
-                button.interactable=can;
-                button.gameObject.SetActive(!completed);
-                if(!completed)button.GetComponentInChildren<Text>().text=active?"연구 중 · "+Mathf.RoundToInt(controller.Sim.ResearchProgress*100f)+"%":can?"연구 시작":reason;
-                SetButtonColor(button,active?HudStyle.Accent:can?HudStyle.SurfaceRaised:new Color(.38f,.4f,.42f,1));
-                Text status=researchStatusTexts[pair.Key];
-                status.text=completed?"완료":active?"진행 "+Mathf.RoundToInt(controller.Sim.ResearchProgress*100f)+"%":can?"연구 가능":"잠김";
-                Image statusBackground=status.transform.parent.GetComponent<Image>();
-                if(statusBackground!=null)
-                {
-                    statusBackground.color=completed?HudStyle.Positive:active?HudStyle.Accent:HudStyle.SurfaceRaised;
-                    status.color=can||active||completed?HudStyle.Foreground(statusBackground.color):HudStyle.TextMuted;
-                }
-                Image cardImage=researchCardImages[pair.Key];
-                if(cardImage!=null)cardImage.color=completed?Color.Lerp(HudStyle.Surface,HudStyle.Positive,.2f):active?Color.Lerp(HudStyle.Surface,HudStyle.Accent,.2f):HudStyle.Surface;
-            }
-            RefreshResearchCardLayout();
+            ResearchTree?.Refresh();
             RefreshTradeState();
-        }
-
-        void RefreshResearchCardLayout()
-        {
-            const float minimumFullHeight=184f, completedHeight=82f, gap=10f;
-            foreach(var eraPair in modalResearchCardsByEra)
-            {
-                RectTransform content;
-                RectTransform viewport;
-                if(!modalResearchContents.TryGetValue(eraPair.Key,out content) || !researchViewports.TryGetValue(eraPair.Key,out viewport))continue;
-                List<TechId> ordered=eraPair.Value.OrderBy(ResearchCardRank).ThenBy(id=>InitialResearchOrder(id)).ThenBy(id=>eraPair.Value.IndexOf(id)).ToList();
-                float y=0;
-                foreach(TechId id in ordered)
-                {
-                    RectTransform rect=researchCardRects[id];
-                    bool completed=TechCatalog.Has(controller.State,id);
-                    Text details=researchCardTexts[id];
-                    details.gameObject.SetActive(true);
-                    float measuredDetailsHeight=Mathf.Ceil(Mathf.Max(0,details.preferredHeight));
-                    float height=completed?completedHeight:Mathf.Max(minimumFullHeight,measuredDetailsHeight+84);
-                    rect.anchoredPosition=new Vector2(0,-y);
-                    rect.sizeDelta=new Vector2(0,height);
-                    details.rectTransform.offsetMin=new Vector2(12,completed?-64:-(height-44));
-                    details.rectTransform.offsetMax=new Vector2(-12,completed?-42:-40);
-                    RectTransform button=researchButtons[id].transform as RectTransform;
-                    if(button!=null){button.offsetMin=new Vector2(12,-height);button.offsetMax=new Vector2(-12,-(height-44));}
-                    y+=height+gap;
-                }
-                content.sizeDelta=new Vector2(0,Mathf.Max(viewport.rect.height,Mathf.Max(0,y-gap)));
-            }
-        }
-
-        int ResearchCardRank(TechId id)
-        {
-            if(TechCatalog.Has(controller.State,id))return 2;
-            string reason;
-            return controller.Sim.CanResearch(id,out reason)?0:1;
-        }
-
-        static string CompletedBenefitSummary(TechSpec spec)
-        {
-            switch(spec.Id)
-            {
-                case TechId.Stonecraft:return "채석장·공원 · 증축 2단계";
-                case TechId.MechanicalPower:return "풍차·제분소·제과점";
-                case TechId.Guilds:return "르네상스 · 창고·시장";
-                case TechId.SteamPower:return "산업 시대 · 증기 동력소";
-                default:return string.IsNullOrEmpty(spec.Benefit)?"연구 완료":spec.Benefit;
-            }
         }
 
         void RefreshTradeState()
@@ -615,59 +425,18 @@ namespace Riverworks
             ClampModalWindow(modalTradeWindow,new Vector2(760,470),24);
             ClampModalWindow(modalConfirmWindow,new Vector2(460,235),24);
             ClampModalWindow(factoryConfigureWindow,new Vector2(690,factoryConfigureWindow==null?330:factoryConfigureWindow.sizeDelta.y),24);
-            if(researchWindow==null)return;
-            RectTransform overlay=researchOverlay.transform as RectTransform;
-            float fallbackScale=Mathf.Max(1,canvasScaler==null?1:canvasScaler.scaleFactor);
-            float availableWidth=overlay!=null&&overlay.rect.width>0?overlay.rect.width:width/fallbackScale;
-            float availableHeight=overlay!=null&&overlay.rect.height>0?overlay.rect.height:height/fallbackScale;
-            researchWindow.anchorMin=researchWindow.anchorMax=new Vector2(.5f,.5f);
-            bool desktopMargins=availableHeight>=480;
-            researchWindow.anchoredPosition=new Vector2(0,desktopMargins?4:0);
-            float researchHeight=desktopMargins?availableHeight-128:availableHeight-32;
-            researchWindow.sizeDelta=new Vector2(Mathf.Min(1180,Mathf.Max(180,availableWidth-48)),Mathf.Max(180,researchHeight));
-            int eraCount=Mathf.Max(1,researchViewports.Count);
-            float bodyWidth=Mathf.Max(192,researchWindow.sizeDelta.x-48);
-            bool horizontalEras=bodyWidth<eraCount*220;
-            modalResearchEraViewport.anchorMin=Vector2.zero;modalResearchEraViewport.anchorMax=Vector2.one;
-            modalResearchEraViewport.offsetMin=new Vector2(24,68);modalResearchEraViewport.offsetMax=new Vector2(-24,-88);
-            modalResearchEraStrip.anchorMin=new Vector2(0,0);modalResearchEraStrip.anchorMax=new Vector2(horizontalEras?0:1,1);
-            modalResearchEraStrip.pivot=new Vector2(0,.5f);modalResearchEraStrip.anchoredPosition=Vector2.zero;
-            const float narrowEraWidth=252;
-            modalResearchEraStrip.sizeDelta=new Vector2(horizontalEras?eraCount*narrowEraWidth:0,0);
-            int index=0;
-            foreach(var pair in researchViewports.OrderBy(p=>(int)p.Key))
+            if (researchWindow != null)
             {
-                RectTransform viewport=pair.Value;
-                RectTransform column=viewport.parent as RectTransform;
-                float min=(float)index/eraCount,max=(float)(index+1)/eraCount;
-                if(horizontalEras)
-                {
-                    column.anchorMin=new Vector2(0,0);column.anchorMax=new Vector2(0,1);
-                    column.offsetMin=new Vector2(index*narrowEraWidth+(index==0?0:7),0);column.offsetMax=new Vector2((index+1)*narrowEraWidth-(index==eraCount-1?0:7),0);
-                }
-                else
-                {
-                    column.anchorMin=new Vector2(min,0);column.anchorMax=new Vector2(max,1);
-                    column.offsetMin=new Vector2(index==0?0:7,0);column.offsetMax=new Vector2(-(index==eraCount-1?0:7),0);
-                }
-                viewport.anchorMin=Vector2.zero;viewport.anchorMax=Vector2.one;
-                viewport.offsetMin=new Vector2(8,8);viewport.offsetMax=new Vector2(-8,-42);
-                index++;
+                RectTransform overlay = researchOverlay.transform as RectTransform;
+                float scale = Mathf.Max(1, canvasScaler == null ? 1 : canvasScaler.scaleFactor);
+                float availableWidth = overlay != null && overlay.rect.width > 0 ? overlay.rect.width : width / scale;
+                float availableHeight = overlay != null && overlay.rect.height > 0 ? overlay.rect.height : height / scale;
+                researchWindow.anchorMin = researchWindow.anchorMax = new Vector2(.5f, .5f);
+                bool desktopMargins = availableHeight >= 480;
+                researchWindow.anchoredPosition = new Vector2(0, desktopMargins ? 4 : 0);
+                researchWindow.sizeDelta = new Vector2(Mathf.Min(1800, Mathf.Max(280, availableWidth - 32)),
+                    Mathf.Max(220, availableHeight - (desktopMargins ? 128 : 32)));
             }
-            foreach(var pair in researchCardRects)
-            {
-                RectTransform card=pair.Value;
-                card.anchorMin=new Vector2(0,1);card.anchorMax=new Vector2(1,1);card.pivot=new Vector2(.5f,1);card.sizeDelta=new Vector2(0,card.sizeDelta.y);
-                RectTransform title=modalResearchTitles[pair.Key];
-                title.anchorMin=new Vector2(0,1);title.anchorMax=new Vector2(1,1);title.offsetMin=new Vector2(12,-36);title.offsetMax=new Vector2(-112,-10);
-                RectTransform badge=modalResearchBadges[pair.Key];
-                badge.anchorMin=badge.anchorMax=new Vector2(1,1);badge.pivot=new Vector2(1,1);badge.anchoredPosition=new Vector2(-12,-10);badge.sizeDelta=new Vector2(88,24);
-                RectTransform details=researchCardTexts[pair.Key].rectTransform;
-                details.anchorMin=new Vector2(0,1);details.anchorMax=new Vector2(1,1);
-                RectTransform button=researchButtons[pair.Key].transform as RectTransform;
-                button.anchorMin=new Vector2(0,1);button.anchorMax=new Vector2(1,1);
-            }
-            RefreshResearchCardLayout();
             RefreshModalBodyLayouts();
             Canvas.ForceUpdateCanvases();
         }

@@ -37,12 +37,6 @@ namespace Riverworks
         readonly List<Text> regionLabels = new List<Text>();
         readonly List<Button> speedButtons = new List<Button>();
         readonly Dictionary<Resource, Button> buyButtons = new Dictionary<Resource, Button>();
-        readonly Dictionary<TechId, Button> researchButtons = new Dictionary<TechId, Button>();
-        readonly Dictionary<TechId, Text> researchCardTexts = new Dictionary<TechId, Text>();
-        readonly Dictionary<TechId, Text> researchStatusTexts = new Dictionary<TechId, Text>();
-        readonly Dictionary<TechId, Image> researchCardImages = new Dictionary<TechId, Image>();
-        readonly Dictionary<TechId, RectTransform> researchCardRects = new Dictionary<TechId, RectTransform>();
-        readonly Dictionary<Era, RectTransform> researchViewports = new Dictionary<Era, RectTransform>();
         readonly Dictionary<FactoryRecipe, Button> factoryRecipeButtons = new Dictionary<FactoryRecipe, Button>();
         readonly Dictionary<Resource, Button> factoryFilterButtons = new Dictionary<Resource, Button>();
         readonly Dictionary<Resource, Button> factoryFeedButtons = new Dictionary<Resource, Button>();
@@ -79,6 +73,8 @@ namespace Riverworks
         bool objectiveExpanded, buildTrayOpen, mobileTradeOpen, factoryModalOpen, menuOpen, overviewOpen, territoryOpen, confirmOpen, observedFactoryPaletteOpen;
         Rect appliedSafeArea;
         int appliedScreenWidth=-1, appliedScreenHeight=-1, lastNoticeVersion=-1;
+
+        public ResearchTreeView ResearchTree { get; private set; }
 
         public bool ConstructionBarVisible => (buildChoicesPanel!=null&&buildChoicesPanel.activeInHierarchy) || (activeToolPanel!=null&&activeToolPanel.activeInHierarchy);
         public float ConstructionBarHeight => buildChoicesPanel!=null&&buildChoicesPanel.activeInHierarchy ? 72f : activeToolPanel!=null&&activeToolPanel.activeInHierarchy ? 52f : 0f;
@@ -828,31 +824,15 @@ namespace Riverworks
             RectTransform factoryOverlayRect=factoryConfigureOverlay==null?null:factoryConfigureOverlay.transform as RectTransform;
             if(factoryBlocker==null || !factoryBlocker.raycastTarget || factoryConfigureWindow==null || factoryOverlayRect==null || !ContainsBounds(factoryOverlayRect,factoryConfigureWindow,1f)){reason="설비 구성 창이 화면 안에서 월드 입력을 차단하지 못합니다.";return false;}
             if(factoryRecipeButtons.Count!=4 || factoryFilterButtons.Count!=9 || factoryFeedButtons.Count!=8){reason="설비 구성 선택지가 모두 생성되지 않았습니다.";return false;}
-            int expectedResearchCount=TechCatalog.All.Count(spec=>spec!=null);
-            if(researchOverlay==null || researchWindow==null || researchCardTexts.Count!=expectedResearchCount || researchButtons.Count!=expectedResearchCount){reason=expectedResearchCount+"개 기술 카드가 모두 생성되지 않았습니다.";return false;}
-            Image blocker=researchOverlay.GetComponent<Image>();
-            if(blocker==null || !blocker.raycastTarget){reason="연구 화면이 월드 입력을 차단하지 않습니다.";return false;}
-            RectTransform overlayRect=researchOverlay.transform as RectTransform;
-            if(overlayRect==null || !ContainsBounds(overlayRect,researchWindow,1f)){reason="연구 창이 현재 화면 영역을 벗어났습니다.";return false;}
-            foreach(var viewport in researchViewports)
-                if(viewport.Value==null || viewport.Value.rect.width<=0 || viewport.Value.rect.height<=0 || !ContainsBounds(researchWindow,viewport.Value,1f)){reason="연구 시대 스크롤 영역이 창을 벗어났습니다: "+viewport.Key;return false;}
-            TechId[] initialResearch={TechId.Stonecraft,TechId.CropRotation};
-            foreach(TechId id in initialResearch)
-            {
-                TechSpec spec=TechCatalog.Get(id);
-                // Completed cards move below available research and hide their action.
-                // The first-screen contract applies while these starting actions still exist.
-                if(spec==null || TechCatalog.Has(controller.State,id))continue;
-                RectTransform viewport;
-                RectTransform cardRect;
-                if(!researchViewports.TryGetValue(spec.Era,out viewport) || !researchCardRects.TryGetValue(id,out cardRect) || !ContainsBounds(viewport,cardRect,1f)){reason="초기 연구 버튼이 첫 화면에 보이지 않습니다: "+id;return false;}
-            }
-            foreach(var pair in researchButtons)
-            {
-                RectTransform rect=pair.Value.transform as RectTransform;
-                if(rect==null || rect.rect.width<200 || rect.rect.height<24){reason="기술 연구 버튼 영역이 올바르지 않습니다: "+pair.Key;return false;}
-                if(pair.Value.gameObject.name!="Button_연구 시작_"+pair.Key){reason="기술 연구 버튼 이름이 안정적이지 않습니다: "+pair.Key;return false;}
-            }
+            if (researchOverlay == null || researchWindow == null || ResearchTree == null)
+            { reason = "연구 지도가 생성되지 않았습니다."; return false; }
+            Image blocker = researchOverlay.GetComponent<Image>();
+            if (blocker == null || !blocker.raycastTarget)
+            { reason = "연구 화면이 월드 입력을 차단하지 않습니다."; return false; }
+            RectTransform overlayRect = researchOverlay.transform as RectTransform;
+            if (overlayRect == null || !ContainsBounds(overlayRect, researchWindow, 1f))
+            { reason = "연구 창이 현재 화면 영역을 벗어났습니다."; return false; }
+            if (!ResearchTree.VerifyLayout(out reason)) return false;
             reason="HUD 레이아웃 정상";return true;
         }
 
