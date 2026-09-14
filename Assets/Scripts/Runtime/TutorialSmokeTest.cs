@@ -41,6 +41,8 @@ namespace Riverworks
         TutorialDirector director;
         TutorialDialogue dialogue;
         Hud hud;
+        Canvas hudCanvas;
+        UiSmokeViewport virtualViewport;
         string output;
         bool finished;
         bool originalReducedMotion;
@@ -105,10 +107,12 @@ namespace Riverworks
             Time.timeScale = 1f;
             FeelUiFeedback.ReducedMotion = false;
             hud = game.CityHud;
+            hudCanvas = hud == null ? null : hud.GetComponent<Canvas>();
             director = game.Tutorial;
             dialogue = hud == null ? null : hud.GetComponentInChildren<TutorialDialogue>(true);
 
             Require(hud != null && hud.gameObject.activeInHierarchy, "the live city HUD is active");
+            Require(hudCanvas != null, "the live HUD exposes its Canvas for native and virtual UI checks");
             Require(director != null && director.Game == game, "the tutorial director observes the live controller");
             Require(dialogue != null, "the live Danwoo dialogue is attached to the existing HUD");
             dialogue.Initialize(director, hud.transform);
@@ -145,13 +149,21 @@ namespace Riverworks
             Require(dialogue.CurrentPageFits,
                 "the Korean pixel-font welcome page fits its rendered dialogue body");
 
-            yield return CaptureAtCurrentResolution("1600x900-01-intro-typing.png");
-            yield return SetResolution(1280, 720);
-            Require(dialogue.Typing, "welcome remains partially typed after the 1280 layout settles");
-            yield return CaptureAtCurrentResolution("1280x720-01-intro-typing.png");
+            yield return CaptureExact(1600, 900, "1600x900-01-intro-typing.png", false);
+            dialogue.Initialize(director, hud.transform);
+            yield return new WaitForSecondsRealtime(.14f);
+            Require(dialogue.Typing && dialogue.RevealedCharacters > 0,
+                "welcome is freshly partial before the exact 1280 capture");
+            yield return CaptureExact(1280, 720, "1280x720-01-intro-typing.png", false);
+            dialogue.Initialize(director, hud.transform);
+            yield return new WaitForSecondsRealtime(.04f);
+            Require(dialogue.Typing, "welcome is freshly typing before the 24-frame sequence");
             yield return RecordTypingFrames();
+            dialogue.Initialize(director, hud.transform);
+            yield return new WaitForSecondsRealtime(.14f);
+            yield return new WaitForEndOfFrame();
             Require(dialogue.Typing && dialogue.RevealedCharacters < TextElementCount(dialogue.CurrentPageText),
-                "24 captured typewriter frames remain an in-progress sequence");
+                "typewriter is re-armed to a deterministic partial state after its 24-frame capture");
 
             int advanceBeforeReveal = director.AdvanceCount;
             int pageBeforeReveal = dialogue.PageIndex;
@@ -183,7 +195,9 @@ namespace Riverworks
             Require(Mathf.Approximately(game.GameSpeed, 0f),
                 "loading a pending tutorial reacquires its owned pause");
 
+            yield return OpenMorePopup("basic tutorial skip");
             yield return ClickAndSettle("Button_TutorialSkip");
+            Require(!dialogue.DialogMoreVisible, "skip closes the tutorial More popup");
             Require(director.IsSkipped && !director.IsRunning && game.State.Tutorial.Step == TutorialStepId.SelectTownHall,
                 "skip preserves the current pending step");
             Require(Mathf.Approximately(game.GameSpeed, 1f), "skip releases the tutorial-owned pause");
@@ -308,7 +322,9 @@ namespace Riverworks
             int housesBeforeReplay = ConnectedCount(game.State, BuildingKind.House);
             int lumberBeforeReplay = ConnectedCount(game.State, BuildingKind.Lumberyard);
             int studiesBeforeReplay = ConnectedCount(game.State, BuildingKind.StudyHouse);
+            yield return OpenMorePopup("tutorial restart");
             yield return ClickAndSettle("Button_TutorialRestart");
+            Require(!dialogue.DialogMoreVisible, "restart closes the tutorial More popup");
             Require(director.Step == TutorialStepId.Welcome && director.IsRunning,
                 "the advice panel's rendered restart button begins a replay");
             Require(EconomySignature(game.State) == economyBeforeReplay,
@@ -325,8 +341,7 @@ namespace Riverworks
             game.State.Tutorial.Step = replayStep;
 
             yield return VerifyLegacyNullFlow();
-            Check(results.Count(line => line.StartsWith("PASS ", StringComparison.Ordinal)) >= 80,
-                "runtime journey records at least 80 independently named checks");
+            yield return VerifyVirtualTutorialUiMatrix();
             game.SetSpeed(0f);
         }
 
@@ -466,18 +481,23 @@ namespace Riverworks
         {
             string directory = Path.Combine(output, "intro-frames");
             Directory.CreateDirectory(directory);
-            for (int index = 0; index < TypingFrameCount; index++)
+            UiSmokeViewport frameViewport = null;
+            try
             {
-                sample.MaximumVerticalDelta = Mathf.Max(sample.MaximumVerticalDelta,
-                    Mathf.Abs(intro.CurrentLocalY - intro.BaseLocalY));
-                sample.FeedbackObserved |= intro.FeedbackPlaying;
-                yield return new WaitForEndOfFrame();
-                Texture2D frame = ScreenCapture.CaptureScreenshotAsTexture();
-                if (frame == null) RecordError("Intro frame returned no texture at index " + index);
-                else
+                frameViewport = new UiSmokeViewport(game.CameraRig.Camera, hudCanvas, 1600, 900);
+                virtualViewport = frameViewport;
+                for (int index = 0; index < TypingFrameCount; index++)
                 {
+                    sample.MaximumVerticalDelta = Mathf.Max(sample.MaximumVerticalDelta,
+                        Mathf.Abs(intro.CurrentLocalY - intro.BaseLocalY));
+                    sample.FeedbackObserved |= intro.FeedbackPlaying;
+                    yield return null;
+                    Texture2D frame = null;
                     try
                     {
+                        frame = frameViewport.Capture();
+                        if (!VisibleFrame(frame, out string reason))
+                            throw new InvalidOperationException("Intro frame is not visibly rendered: " + reason);
                         File.WriteAllBytes(Path.Combine(directory, "frame-" + index.ToString("D3") + ".png"),
                             frame.EncodeToPNG());
                     }
@@ -485,10 +505,16 @@ namespace Riverworks
                     {
                         RecordError("Could not write intro frame " + index + ": " + exception.Message);
                     }
-                    Destroy(frame);
+                    finally { if (frame != null) Destroy(frame); }
                 }
             }
-            results.Add("CAPTURE 24 Town Hall arrival frames at " + Screen.width + "x" + Screen.height);
+            finally
+            {
+                virtualViewport = null;
+                frameViewport?.Dispose();
+            }
+            yield return null;
+            results.Add("CAPTURE 24 exact offscreen Town Hall arrival frames at 1600x900");
         }
 
         IEnumerator VerifyInWorldGuide()
@@ -676,18 +702,16 @@ namespace Riverworks
         void VerifyDialogueGeometry()
         {
             RectTransform root = Root("TutorialDialogue") as RectTransform;
-            Require(root != null && Mathf.Abs(root.rect.width - 660f) <= 1f &&
-                    Mathf.Abs(root.rect.height - 156f) <= 1f,
-                "the owned tutorial dialogue is exactly 660x156 design pixels");
-            Check(root != null && root.parent == hud.transform,
-                "the tutorial dialogue is owned directly by the existing HUD Canvas");
+            VerifyResponsiveDialogueGeometry(false, "native 1600x900 welcome");
+            Check(root != null && root.parent != null && root.parent.name == "CitySafeArea",
+                "the tutorial dialogue is owned by the HUD safe-area root");
             string[] touchTargets =
             {
                 "TutorialDialogueBody", "Button_TutorialCollapse", "Button_TutorialSkip",
                 "Button_TutorialAdvance", "Button_TutorialReopen", "Button_TutorialRestart", "Button_IntroSkip",
-                "Button_GuidanceLessons", "Button_GuidanceNext", "Button_GuidanceToggle", "Button_Advice_City",
+                "Button_TutorialMore", "Button_GuidanceLessons", "Button_GuidanceNext", "Button_GuidanceToggle", "Button_Advice_City",
                 "Button_Advice_Production", "Button_Advice_Research", "Button_Advice_Factory",
-                "Button_Advice_Territory"
+                "Button_Advice_Territory", "Button_GuidanceLessonsClose"
             };
             foreach (string name in touchTargets)
             {
@@ -701,6 +725,28 @@ namespace Riverworks
                 Check(rect != null && rect.rect.width >= 44f && rect.rect.height >= 44f,
                     lesson.StableId + " picker button keeps a 44-pixel minimum touch target");
             }
+            Transform more = Root("TutorialMorePopup");
+            string[] hiddenButtonNames =
+            {
+                "Button_TutorialSkip", "Button_TutorialRestart", "Button_GuidanceLessons",
+                "Button_GuidanceNext", "Button_GuidanceToggle"
+            };
+            foreach (string name in hiddenButtonNames)
+            {
+                Transform button = Root(name);
+                Check(more != null && button != null && button.IsChildOf(more),
+                    name + " keeps its stable name inside TutorialMorePopup");
+            }
+
+            Text[] texts = TutorialVisualTexts();
+            Text body = Root("TutorialDialogueBody")?.GetComponentInChildren<Text>(true);
+            Check(texts.Length > 0 && texts.All(text => text.fontStyle == FontStyle.Normal),
+                "tutorial visuals use no synthetic bold text");
+            Check(body != null && body.fontSize == HudStyle.BodySize && HudStyle.BodySize == 11,
+                "tutorial body uses the shared 11-pixel type size");
+            Check(texts.Any(text => text.transform.parent == root && text.fontSize == HudStyle.TitleSize) &&
+                  HudStyle.TitleSize == 22,
+                "tutorial title uses the shared 22-pixel type size");
         }
 
         IEnumerator AcknowledgeIncompleteTask(TutorialStepId expected, string label)
@@ -880,12 +926,24 @@ namespace Riverworks
 
             yield return ClickAndSettle("Button_TutorialReopen");
             Require(director.IsAdviceMode, "the completed guide opens its feature controls");
+            yield return OpenMorePopup("guidance lesson list");
             yield return ClickAndSettle("Button_GuidanceLessons");
-            Require(IsActive("GuidanceLessonPicker"), "the rendered feature lesson picker opens");
+            Require(!dialogue.DialogMoreVisible && dialogue.DialogLessonPickerVisible &&
+                    IsActive("GuidanceLessonPicker"),
+                "feature-list action closes More and opens the rendered lesson picker");
             int lessonButtons = hud.GetComponentsInChildren<Button>(true).Count(button =>
                 button.name.StartsWith("Button_GuidanceLesson_", StringComparison.Ordinal));
             Require(lessonButtons == GuidanceLessonCatalog.Count,
                 "the manual picker exposes all 19 current feature lessons");
+            yield return ClickAndSettle("Button_GuidanceLessonsClose", .08f);
+            Require(!dialogue.DialogLessonPickerVisible && !dialogue.DialogMoreVisible &&
+                    director.IsAdviceMode && !game.ModalOpen,
+                "the rendered picker close returns to non-modal advice without changing its state");
+            yield return OpenMorePopup("reopen guidance lesson list");
+            yield return ClickAndSettle("Button_GuidanceLessons", .08f);
+            Require(dialogue.DialogLessonPickerVisible && !dialogue.DialogMoreVisible,
+                "the feature lesson picker reopens after its dedicated close");
+            VerifyAllGuidanceButtonsAccessible("native guidance picker");
 
             GuidanceLessonDefinition lockedLesson = GuidanceLessonCatalog.Get(GuidanceLessonId.FoodProductionChain);
             Require(!GuidanceLessonCatalog.IsUnlocked(game.State, lockedLesson.Id),
@@ -927,7 +985,9 @@ namespace Riverworks
                     !GuidanceLessonCatalog.IsSeen(game.State, later.Id),
                 "a later technology unlock exposes the earliest relevant unseen lesson");
             yield return ClickAndSettle("Button_TutorialReopen");
+            yield return OpenMorePopup("next eligible guidance lesson");
             yield return ClickAndSettle("Button_GuidanceNext");
+            Require(!dialogue.DialogMoreVisible, "next-feature action closes the tutorial More popup");
             Require(director.IsLessonMode && director.CurrentLessonId == GuidanceLessonId.BuildingUpgrades,
                 "the rendered next-feature button opens only the known unseen unlocked lesson");
             int beforeDisableMask = game.State.Tutorial.GuidanceSeenMask;
@@ -954,13 +1014,312 @@ namespace Riverworks
 
             yield return ClickAndSettle("Button_TutorialReopen");
             Require(director.IsAdviceMode, "advanced completed city opens the feature control panel");
+            yield return OpenMorePopup("enable guidance");
             yield return ClickAndSettle("Button_GuidanceToggle");
+            Require(!dialogue.DialogMoreVisible, "guidance-enable action closes the tutorial More popup");
             Require(director.GuidanceEnabled && !director.IsLessonMode,
                 "the rendered guidance toggle enables future lessons without an immediate popup");
+            yield return OpenMorePopup("disable guidance");
             yield return ClickAndSettle("Button_GuidanceToggle");
+            Require(!dialogue.DialogMoreVisible, "guidance-disable action closes the tutorial More popup");
             Require(!director.GuidanceEnabled && game.State.Tutorial.GuidanceSeenMask == beforeDisableMask,
                 "the rendered guidance toggle disables tips without changing seen history");
             VerifyGuidancePersisted(beforeDisableMask, false, "advanced guidance toggle");
+        }
+
+        IEnumerator VerifyVirtualTutorialUiMatrix()
+        {
+            int[,] sizes = { { 1024, 768 }, { 1280, 720 }, { 1600, 900 }, { 2048, 1536 } };
+            results.Add("INFO exact offscreen RenderTexture UI checks are not physical monitor or device proof");
+            for (int index = 0; index < sizes.GetLength(0); index++)
+            {
+                int width = sizes[index, 0], height = sizes[index, 1];
+                string label = width + "x" + height + " virtual";
+                UiSmokeViewport frame = null;
+                try
+                {
+                    frame = new UiSmokeViewport(game.CameraRig.Camera, hudCanvas, width, height);
+                    virtualViewport = frame;
+                    yield return null;
+                    yield return null;
+                    Canvas.ForceUpdateCanvases();
+                    Require(FrameWidth == width && FrameHeight == height &&
+                            game.CameraRig.Camera.pixelWidth == width && game.CameraRig.Camera.pixelHeight == height,
+                        label + " owns an exact offscreen camera and Canvas frame");
+
+                    yield return VerifyAllAuthoredPagesAt(label);
+                    VerifyResponsiveDialogueGeometry(false, label + " normal dialogue");
+                    VerifyTutorialTypography(label);
+                    yield return VerifyConstructionSeparation(label);
+
+                    director.AskAdvice(AdvisorTopic.City);
+                    dialogue.Initialize(director, hud.transform);
+                    yield return null;
+                    Canvas.ForceUpdateCanvases();
+                    VerifyResponsiveDialogueGeometry(true, label + " advice dialogue");
+                    VerifyTutorialTypography(label + " advice");
+                    Require(dialogue.ActualPageFits, label + " advice page fits its actual rendered body");
+
+                    yield return OpenMorePopup(label + " selected More menu");
+                    VerifyMorePopupBounds(label);
+                    yield return CaptureVirtual(label.Replace(" virtual", "") + "-tutorial-more.png");
+                    yield return ClickAndSettle("Button_GuidanceLessons", .04f);
+                    Require(!dialogue.DialogMoreVisible && dialogue.DialogLessonPickerVisible,
+                        label + " More action closes the popup and opens the lesson picker");
+                    Require(RectWithinFrame(Root("GuidanceLessonPicker") as RectTransform, 1f),
+                        label + " guidance picker remains inside the exact frame");
+                    yield return CaptureVirtual(label.Replace(" virtual", "") + "-guidance-picker.png");
+
+                    yield return ClickAndSettle("Button_GuidanceLessonsClose", .04f);
+                    Require(!dialogue.DialogLessonPickerVisible && !dialogue.DialogMoreVisible &&
+                            director.IsAdviceMode && !game.ModalOpen,
+                        label + " picker close preserves non-modal advice state");
+                    yield return OpenMorePopup(label + " picker reopen");
+                    yield return ClickAndSettle("Button_GuidanceLessons", .04f);
+                    Require(dialogue.DialogLessonPickerVisible && !dialogue.DialogMoreVisible,
+                        label + " dedicated-close picker reopens through More");
+                    VerifyAllGuidanceButtonsAccessible(label + " guidance picker");
+                    yield return ClickAndSettle("Button_TutorialMore", .04f);
+                    Require(dialogue.DialogMoreVisible && !dialogue.DialogLessonPickerVisible && !game.ModalOpen,
+                        label + " More path also dismisses the picker without opening a modal");
+                    yield return ClickAndSettle("Button_TutorialMore", .04f);
+                    Require(!dialogue.DialogMoreVisible, label + " More button closes its popup");
+                }
+                finally
+                {
+                    virtualViewport = null;
+                    frame?.Dispose();
+                }
+                yield return null;
+            }
+            results.Add("EVIDENCE 4 exact virtual UI frames verified; physical display and device validation remain separate");
+        }
+
+        IEnumerator VerifyAllAuthoredPagesAt(string label)
+        {
+            director.Restart();
+            yield return null;
+            TutorialProgress progress = game.State.Tutorial;
+            progress.Enabled = true;
+            progress.Completed = false;
+            progress.Skipped = false;
+            progress.Collapsed = false;
+            progress.TownHallIntroPlayed = true;
+
+            foreach (TutorialStepDefinition step in TutorialCatalog.All)
+            {
+                progress.Step = step.Id;
+                progress.Collapsed = false;
+                dialogue.Initialize(director, hud.transform);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                yield return VerifyRenderedPages(label + " basic " + step.StableId, step.Dialogue);
+            }
+
+            foreach (GuidanceLessonDefinition lesson in GuidanceLessonCatalog.All)
+            {
+                Require(director.OpenLesson(lesson.Id),
+                    label + " opens guidance page fixture " + lesson.StableId);
+                dialogue.Initialize(director, hud.transform);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                yield return VerifyRenderedPages(label + " guidance " + lesson.StableId,
+                    string.Join("\n\n", lesson.Pages));
+            }
+
+            director.Restart();
+            dialogue.Initialize(director, hud.transform);
+            yield return null;
+            Canvas.ForceUpdateCanvases();
+        }
+
+        IEnumerator VerifyRenderedPages(string label, string expectedFullText)
+        {
+            Require(dialogue.FullText == expectedFullText && dialogue.PageCount >= 1,
+                label + " renders its exact authored full text");
+            int guard = 0;
+            while (guard++ < 32)
+            {
+                Require(dialogue.CurrentPageFits && dialogue.ActualPageFits,
+                    label + " page " + (dialogue.PageIndex + 1) + " fits measured rendered bounds");
+                Require(!string.IsNullOrWhiteSpace(dialogue.CurrentPageText) &&
+                        expectedFullText.Contains(dialogue.CurrentPageText),
+                    label + " page " + (dialogue.PageIndex + 1) + " preserves authored text");
+                dialogue.RevealAll();
+                Require(dialogue.DisplayedText == dialogue.CurrentPageText,
+                    label + " page " + (dialogue.PageIndex + 1) + " reveals without clipping text");
+                if (dialogue.PageIndex >= dialogue.PageCount - 1) yield break;
+                int previous = dialogue.PageIndex;
+                yield return ClickAndSettle("Button_TutorialAdvance", .01f);
+                Require(dialogue.PageIndex == previous + 1,
+                    label + " advances exactly one rendered page");
+            }
+            throw new InvalidOperationException(label + " exceeded the 32-page UI safety bound");
+        }
+
+        IEnumerator VerifyConstructionSeparation(string label)
+        {
+            if (game.SelectedTool != BuildingKind.None || game.DemolitionMode || game.FactoryToolActive)
+                game.ClearConstructionTools();
+            if (IsActive("BuildChoices")) yield return ClickAndSettle("Button_BuildCollapse", .04f);
+            if (!IsButtonFirstHit("Button_도로")) yield return ClickAndSettle("Button_도시", .04f);
+            Require(hud.ConstructionBarVisible && IsActive("BuildChoices"),
+                label + " opens the construction tray beside expanded dialogue");
+            yield return null;
+            Canvas.ForceUpdateCanvases();
+            Require(!ScreenRectsIntersect(Root("TutorialDialogue") as RectTransform,
+                    Root("BuildChoices") as RectTransform, .5f),
+                label + " expanded dialogue does not intersect the construction tray");
+            yield return CaptureVirtual(label.Replace(" virtual", "") + "-tutorial-construction.png");
+
+            yield return ClickAndSettle("Button_도로", .04f);
+            Require(hud.ConstructionBarVisible && IsActive("ActiveTool"),
+                label + " shows the selected construction tool bar");
+            yield return null;
+            Canvas.ForceUpdateCanvases();
+            Require(!ScreenRectsIntersect(Root("TutorialDialogue") as RectTransform,
+                    Root("ActiveTool") as RectTransform, .5f),
+                label + " expanded dialogue does not intersect the selected-tool bar");
+            yield return ClickAndSettle("Button_ToolCancel", .04f);
+        }
+
+        IEnumerator CaptureVirtual(string name)
+        {
+            if (virtualViewport == null) throw new InvalidOperationException("Virtual UI capture has no viewport");
+            yield return new WaitForSecondsRealtime(.3f);
+            yield return null;
+            Require(VisiblePanelsSettled(out string settleReason),
+                name + " capture waits for visible panel fades: " + settleReason);
+            Texture2D texture = null;
+            try
+            {
+                texture = virtualViewport.Capture();
+                Require(texture != null && texture.width == FrameWidth && texture.height == FrameHeight,
+                    name + " capture has exact virtual dimensions");
+                Require(VisibleFrame(texture, out string reason), name + " capture is visibly rendered: " + reason);
+                File.WriteAllBytes(Path.Combine(output, "virtual-" + name), texture.EncodeToPNG());
+                results.Add("CAPTURE virtual-" + name + " " + texture.width + "x" + texture.height);
+            }
+            finally { if (texture != null) Destroy(texture); }
+        }
+
+        void VerifyResponsiveDialogueGeometry(bool advice, string label)
+        {
+            RectTransform root = Root("TutorialDialogue") as RectTransform;
+            RectTransform safe = Root("CitySafeArea") as RectTransform;
+            Require(root != null && safe != null, label + " has dialogue and safe-area geometry");
+            float expectedWidth = Mathf.Clamp(safe.rect.width - 16f, 480f, 680f);
+            float expectedHeight = advice ? 230f : 174f;
+            Require(Mathf.Abs(root.rect.width - expectedWidth) <= 1f &&
+                    Mathf.Abs(root.rect.height - expectedHeight) <= 1f,
+                label + " uses responsive " + expectedWidth.ToString("0.#") + "x" +
+                expectedHeight.ToString("0.#") + " dialogue geometry");
+            Require(root.rect.width <= 680.01f && root.rect.width <= safe.rect.width - 15f,
+                label + " respects the 680-pixel maximum and safe width");
+            Require(RectWithinFrame(root, 1f), label + " dialogue remains inside the selected frame");
+        }
+
+        void VerifyTutorialTypography(string label)
+        {
+            Text[] texts = TutorialVisualTexts();
+            Text body = Root("TutorialDialogueBody")?.GetComponentInChildren<Text>(true);
+            RectTransform dialogueRoot = Root("TutorialDialogue") as RectTransform;
+            Require(texts.Length > 0 && texts.All(text => text.fontStyle == FontStyle.Normal),
+                label + " tutorial text uses no synthetic bold styling");
+            Require(texts.All(text => text.font == GameFont.LoadBundledPixelFont()),
+                label + " tutorial text uses the bundled Korean pixel font");
+            Require(body != null && body.fontSize == 11 && body.fontSize == HudStyle.BodySize,
+                label + " body text is exactly 11 pixels");
+            Require(dialogueRoot != null && texts.Any(text => text.transform.parent == dialogueRoot &&
+                    text.fontSize == 22 && text.fontSize == HudStyle.TitleSize),
+                label + " title text is exactly 22 pixels");
+        }
+
+        void VerifyMorePopupBounds(string label)
+        {
+            RectTransform popup = Root("TutorialMorePopup") as RectTransform;
+            Require(dialogue.DialogMoreVisible && popup != null && RectWithinFrame(popup, 1f),
+                label + " More popup remains inside the exact frame");
+            Rect popupRect = ProjectedRect(popup);
+            Button[] visibleButtons = popup.GetComponentsInChildren<Button>(false);
+            Require(visibleButtons.Length >= 3,
+                label + " More popup contains the state-appropriate actions");
+            foreach (Button button in visibleButtons)
+            {
+                RectTransform rect = button.transform as RectTransform;
+                Check(rect != null && RectContains(popupRect, ProjectedRect(rect), 1f) && RectWithinFrame(rect, 1f),
+                    label + " More action " + button.name + " stays inside popup and frame bounds");
+            }
+        }
+
+        Text[] TutorialVisualTexts()
+        {
+            var texts = new List<Text>();
+            foreach (string name in new[] { "TutorialDialogue", "Button_TutorialReopen", "Button_IntroSkip" })
+            {
+                Transform root = Root(name);
+                if (root != null) texts.AddRange(root.GetComponentsInChildren<Text>(true));
+            }
+            return texts.Distinct().ToArray();
+        }
+
+        bool RectWithinFrame(RectTransform rect, float tolerance)
+        {
+            if (rect == null) return false;
+            Rect projected = ProjectedRect(rect);
+            return projected.xMin >= -tolerance && projected.yMin >= -tolerance &&
+                   projected.xMax <= FrameWidth + tolerance && projected.yMax <= FrameHeight + tolerance;
+        }
+
+        bool ScreenRectsIntersect(RectTransform first, RectTransform second, float tolerance)
+        {
+            if (first == null || second == null) return true;
+            Rect a = ProjectedRect(first), b = ProjectedRect(second);
+            return a.xMin < b.xMax - tolerance && a.xMax > b.xMin + tolerance &&
+                   a.yMin < b.yMax - tolerance && a.yMax > b.yMin + tolerance;
+        }
+
+        Rect ProjectedRect(RectTransform rect)
+        {
+            var corners = new Vector3[4];
+            rect.GetWorldCorners(corners);
+            Canvas canvas = rect.GetComponentInParent<Canvas>();
+            Camera projectionCamera = canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay
+                ? null : canvas.worldCamera;
+            Vector2 first = RectTransformUtility.WorldToScreenPoint(projectionCamera, corners[0]);
+            float minX = first.x, maxX = first.x, minY = first.y, maxY = first.y;
+            for (int index = 1; index < corners.Length; index++)
+            {
+                Vector2 point = RectTransformUtility.WorldToScreenPoint(projectionCamera, corners[index]);
+                minX = Mathf.Min(minX, point.x); maxX = Mathf.Max(maxX, point.x);
+                minY = Mathf.Min(minY, point.y); maxY = Mathf.Max(maxY, point.y);
+            }
+            return Rect.MinMaxRect(minX, minY, maxX, maxY);
+        }
+
+        static bool RectContains(Rect outer, Rect inner, float tolerance) =>
+            inner.xMin >= outer.xMin - tolerance && inner.yMin >= outer.yMin - tolerance &&
+            inner.xMax <= outer.xMax + tolerance && inner.yMax <= outer.yMax + tolerance;
+
+        bool VisiblePanelsSettled(out string reason)
+        {
+            if (hud == null)
+            {
+                reason = "HUD unavailable";
+                return false;
+            }
+            foreach (FeelUiFeedback feedback in hud.GetComponentsInChildren<FeelUiFeedback>(false))
+            {
+                if (feedback == null || feedback.Role != FeelUiFeedback.FeedbackRole.Panel) continue;
+                CanvasGroup group = feedback.GetComponent<CanvasGroup>();
+                if (group != null && group.alpha < .98f)
+                {
+                    reason = feedback.name + " alpha " + group.alpha.ToString("0.###");
+                    return false;
+                }
+            }
+            reason = "all active panel alpha values are settled";
+            return true;
         }
 
         IEnumerator VerifyLegacyNullFlow()
@@ -981,6 +1340,48 @@ namespace Riverworks
             Require(dialogue.Visible && Mathf.Approximately(game.GameSpeed, 0f),
                 "explicit legacy guide opening renders and pauses safely");
             VerifyPersistedStep(TutorialStepId.Welcome, false, "legacy explicit guide open");
+        }
+
+        IEnumerator OpenMorePopup(string phase)
+        {
+            Require(!dialogue.DialogMoreVisible, phase + " starts with the tutorial More popup closed");
+            yield return ClickAndSettle("Button_TutorialMore", .12f);
+            Require(dialogue.DialogMoreVisible && IsActive("TutorialMorePopup"),
+                phase + " opens TutorialMorePopup through its rendered button");
+            Require(RectWithinFrame(Root("TutorialMorePopup") as RectTransform, 1f),
+                phase + " More popup remains inside the selected frame bounds");
+        }
+
+        void VerifyAllGuidanceButtonsAccessible(string label)
+        {
+            int accessible = 0;
+            ScrollRect pickerScroll = Root("GuidanceLessonPicker")?.GetComponent<ScrollRect>();
+            foreach (GuidanceLessonDefinition lesson in GuidanceLessonCatalog.All)
+            {
+                Button button = FindButton("Button_GuidanceLesson_" + lesson.StableId);
+                bool reached = false;
+                if (button != null && pickerScroll != null)
+                {
+                    for (int step = 0; step <= 32 && !reached; step++)
+                    {
+                        pickerScroll.StopMovement();
+                        pickerScroll.verticalNormalizedPosition = 1f - step / 32f;
+                        Canvas.ForceUpdateCanvases();
+                        reached = IsButtonFirstHit(button.name);
+                    }
+                }
+                else if (button != null) reached = IsButtonFirstHit(button.name);
+                Check(reached, label + " reaches and raycasts " + lesson.StableId);
+                if (reached) accessible++;
+            }
+            if (pickerScroll != null)
+            {
+                pickerScroll.StopMovement();
+                pickerScroll.verticalNormalizedPosition = 1f;
+                Canvas.ForceUpdateCanvases();
+            }
+            Require(accessible == GuidanceLessonCatalog.Count,
+                label + " reaches all 19 guidance lesson buttons");
         }
 
         IEnumerator ClickAndSettle(string name, float seconds = .24f)
@@ -1061,25 +1462,31 @@ namespace Riverworks
 
         IEnumerator CapturePair(string stem)
         {
-            yield return SetResolution(1600, 900);
-            yield return CaptureAtCurrentResolution("1600x900-" + stem + ".png");
-            yield return SetResolution(1280, 720);
-            yield return CaptureAtCurrentResolution("1280x720-" + stem + ".png");
+            yield return CaptureExact(1600, 900, "1600x900-" + stem + ".png");
+            yield return CaptureExact(1280, 720, "1280x720-" + stem + ".png");
         }
 
         IEnumerator RecordTypingFrames()
         {
             string directory = Path.Combine(output, "typing-frames");
             Directory.CreateDirectory(directory);
-            for (int index = 0; index < TypingFrameCount; index++)
+            UiSmokeViewport frameViewport = null;
+            int startingCharacters = dialogue.RevealedCharacters;
+            int maximumCharacters = startingCharacters;
+            try
             {
-                yield return new WaitForEndOfFrame();
-                Texture2D frame = ScreenCapture.CaptureScreenshotAsTexture();
-                if (frame == null) RecordError("Typing frame returned no texture at index " + index);
-                else
+                frameViewport = new UiSmokeViewport(game.CameraRig.Camera, hudCanvas, 1280, 720);
+                virtualViewport = frameViewport;
+                for (int index = 0; index < TypingFrameCount; index++)
                 {
+                    yield return null;
+                    maximumCharacters = Mathf.Max(maximumCharacters, dialogue.RevealedCharacters);
+                    Texture2D frame = null;
                     try
                     {
+                        frame = frameViewport.Capture();
+                        if (!VisibleFrame(frame, out string reason))
+                            throw new InvalidOperationException("Typing frame is not visibly rendered: " + reason);
                         File.WriteAllBytes(Path.Combine(directory, "frame-" + index.ToString("D3") + ".png"),
                             frame.EncodeToPNG());
                     }
@@ -1087,35 +1494,52 @@ namespace Riverworks
                     {
                         RecordError("Could not write typing frame " + index + ": " + exception.Message);
                     }
-                    Destroy(frame);
+                    finally { if (frame != null) Destroy(frame); }
                 }
-                yield return new WaitForSecondsRealtime(.02f);
             }
-            results.Add("CAPTURE 24 dialogue typing frames at " + Screen.width + "x" + Screen.height);
+            finally
+            {
+                virtualViewport = null;
+                frameViewport?.Dispose();
+            }
+            yield return null;
+            Require(startingCharacters < TextElementCount(dialogue.CurrentPageText) &&
+                    maximumCharacters > startingCharacters,
+                "24 exact offscreen frames record real typewriter progress");
+            results.Add("CAPTURE 24 exact offscreen dialogue typing frames at 1280x720");
         }
 
-        IEnumerator CaptureAtCurrentResolution(string name)
+        IEnumerator CaptureExact(int width, int height, string name, bool settle = true)
         {
-            float deadline = Time.realtimeSinceStartup + 5f;
-            string lastReason = "no frame captured";
-            while (Time.realtimeSinceStartup < deadline)
+            UiSmokeViewport frameViewport = null;
+            Texture2D texture = null;
+            try
             {
-                yield return new WaitForEndOfFrame();
-                Texture2D texture = null;
-                bool captured = false;
-                try
+                if (settle)
                 {
-                    texture = ScreenCapture.CaptureScreenshotAsTexture();
-                    if (!VisibleFrame(texture, out lastReason)) continue;
-                    File.WriteAllBytes(Path.Combine(output, name), texture.EncodeToPNG());
-                    results.Add("CAPTURE " + name + " " + texture.width + "x" + texture.height);
-                    captured = true;
+                    yield return new WaitForSecondsRealtime(.3f);
+                    yield return new WaitForEndOfFrame();
+                    Require(VisiblePanelsSettled(out string settleReason),
+                        name + " capture waits for visible panel fades: " + settleReason);
                 }
-                catch (Exception exception) { lastReason = exception.Message; }
-                finally { if (texture != null) Destroy(texture); }
-                if (captured) yield break;
+                frameViewport = new UiSmokeViewport(game.CameraRig.Camera, hudCanvas, width, height);
+                virtualViewport = frameViewport;
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                texture = frameViewport.Capture();
+                Require(texture != null && texture.width == width && texture.height == height,
+                    name + " capture has exact offscreen dimensions");
+                Require(VisibleFrame(texture, out string reason), name + " is visibly rendered: " + reason);
+                File.WriteAllBytes(Path.Combine(output, name), texture.EncodeToPNG());
+                results.Add("CAPTURE " + name + " " + texture.width + "x" + texture.height + " exact offscreen");
             }
-            RecordError("Capture failed within five seconds: " + name + " - " + lastReason);
+            finally
+            {
+                if (texture != null) Destroy(texture);
+                virtualViewport = null;
+                frameViewport?.Dispose();
+            }
+            yield return null;
         }
 
         void VerifyPersistedStep(TutorialStepId expected, bool completed, string phase, bool? expectedEnabled = null)
@@ -1210,8 +1634,11 @@ namespace Riverworks
             return false;
         }
 
+        int FrameWidth => virtualViewport != null ? virtualViewport.Width : Screen.width;
+        int FrameHeight => virtualViewport != null ? virtualViewport.Height : Screen.height;
+
         bool VisibleScreenPoint(Vector2 point) => point.x >= 1f && point.y >= 1f &&
-            point.x < Screen.width - 1f && point.y < Screen.height - 1f;
+            point.x < FrameWidth - 1f && point.y < FrameHeight - 1f;
 
         Button FindButton(string name) => hud == null ? null :
             hud.GetComponentsInChildren<Button>(true).FirstOrDefault(button => button.name == name);
@@ -1242,17 +1669,21 @@ namespace Riverworks
             return hits.Count > 0 && IsButtonHit(button, hits[0].gameObject);
         }
 
-        static PointerEventData PointerAtButtonCenter(Button button)
+        PointerEventData PointerAtButtonCenter(Button button)
         {
             if (EventSystem.current == null) throw new InvalidOperationException("EventSystem unavailable");
             RectTransform rect = button.transform as RectTransform;
             if (rect == null) throw new InvalidOperationException("Button has no RectTransform: " + button.name);
             var corners = new Vector3[4];
             rect.GetWorldCorners(corners);
-            Vector2 center = new Vector2((corners[0].x + corners[2].x) * .5f,
-                (corners[0].y + corners[2].y) * .5f);
-            if (corners[2].x - corners[0].x < 1f || corners[2].y - corners[0].y < 1f ||
-                center.x < 0f || center.x > Screen.width || center.y < 0f || center.y > Screen.height)
+            Canvas canvas = button.GetComponentInParent<Canvas>();
+            Camera projectionCamera = canvas == null || canvas.renderMode == RenderMode.ScreenSpaceOverlay
+                ? null : canvas.worldCamera;
+            Vector3 worldCenter = (corners[0] + corners[2]) * .5f;
+            Vector2 center = RectTransformUtility.WorldToScreenPoint(projectionCamera, worldCenter);
+            Rect projected = ProjectedRect(rect);
+            if (projected.width < 1f || projected.height < 1f ||
+                center.x < 0f || center.x > FrameWidth || center.y < 0f || center.y > FrameHeight)
                 throw new InvalidOperationException("Button has no visible screen rect: " + button.name);
             return new PointerEventData(EventSystem.current)
             {

@@ -203,10 +203,10 @@ namespace Riverworks
             Assert(hud!=null,"HUD exists for layout validation");
             Assert(hud.VerifyLayout(out var reason),"active categories and buttons are visible and raycastable at "+Screen.width+"x"+Screen.height+": "+reason);
             AssertFirstHit("Button_Factory");
-            foreach(string category in new[]{"주거","생산","산업","도시"})
+            foreach(string categoryButton in new[]{"Button_주거","Button_생산","Button_산업","Button_도시","Button_Factory","Button_물류"})
             {
-                Click("Button_"+category);Canvas.ForceUpdateCanvases();
-                if(!hud.VerifyLayout(out reason)) throw new Exception("Category layout invalid: "+category+" "+reason);
+                Click(categoryButton);Canvas.ForceUpdateCanvases();
+                if(!hud.VerifyLayout(out reason)) throw new Exception("Category layout invalid: "+categoryButton+" "+reason);
                 foreach(var button in FindObjectsByType<Button>())
                 {
                     if(!button.gameObject.activeInHierarchy)continue;
@@ -216,7 +216,7 @@ namespace Riverworks
             }
             Click("Button_생산");
             AssertFirstHit("Button_Factory");
-            Assert(true,"all four build categories and the factory action fit at "+Screen.width+"x"+Screen.height);
+            Assert(true,"all six build categories and the factory action fit at "+Screen.width+"x"+Screen.height);
         }
         void VerifyResearchCatalog()
         {
@@ -226,8 +226,10 @@ namespace Riverworks
             Assert(specs.Select(s=>s.Id).Distinct().Count()==specs.Length,"technology catalog contains no duplicate IDs");
             Assert(specs.All(spec=>FindButton("Button_연구 시작_"+spec.Id)!=null),"research tree renders one button for every catalog technology");
             ScrollRect[] scrolls=FindResearchScrolls();
-            int eraCount=specs.Select(spec=>spec.Era).Distinct().Count();
-            Assert(scrolls.Length==eraCount && scrolls.All(scroll=>scroll.content!=null && (scroll.viewport??scroll.GetComponent<RectTransform>())!=null),"research tree renders one scrollable viewport per catalog era");
+            Era[] eras=specs.Select(spec=>spec.Era).Distinct().ToArray();
+            Assert(scrolls.Length==eras.Length && eras.All(era=>scrolls.Count(scroll=>scroll.name=="ResearchScroll_"+era && scroll.viewport==scroll.GetComponent<RectTransform>() && scroll.content!=null && scroll.content.name=="ResearchContent_"+era && scroll.content.parent==scroll.viewport)==1),"research tree renders one matching vertical viewport and content per catalog era");
+            ScrollRect eraScroll=FindResearchEraScroll();
+            Assert(eraScroll!=null && eraScroll.horizontal && !eraScroll.vertical && eraScroll.viewport==eraScroll.GetComponent<RectTransform>() && eraScroll.content!=null && eraScroll.content.name=="ResearchEraStrip" && eraScroll.content.parent==eraScroll.viewport,"research tree provides a separate outer horizontal era scroller");
             Canvas.ForceUpdateCanvases();
             Assert(scrolls.Any(scroll=>scroll.content.rect.height>(scroll.viewport??scroll.GetComponent<RectTransform>()).rect.height+.5f || scroll.content.rect.width>(scroll.viewport??scroll.GetComponent<RectTransform>()).rect.width+.5f),"expanded research tree content extends beyond its viewport");
         }
@@ -258,7 +260,12 @@ namespace Riverworks
         static ScrollRect[] FindResearchScrolls()
         {
             Transform overlay=FindObjectsByType<Transform>(FindObjectsInactive.Include).FirstOrDefault(item=>item.name=="ResearchOverlay");
-            return overlay==null?Array.Empty<ScrollRect>():FindObjectsByType<ScrollRect>(FindObjectsInactive.Include).Where(item=>item.transform.IsChildOf(overlay)).ToArray();
+            return overlay==null?Array.Empty<ScrollRect>():FindObjectsByType<ScrollRect>(FindObjectsInactive.Include).Where(item=>item.transform.IsChildOf(overlay) && item.vertical && !item.horizontal && item.name.StartsWith("ResearchScroll_",StringComparison.Ordinal)).ToArray();
+        }
+        static ScrollRect FindResearchEraScroll()
+        {
+            Transform overlay=FindObjectsByType<Transform>(FindObjectsInactive.Include).FirstOrDefault(item=>item.name=="ResearchOverlay");
+            return overlay==null?null:FindObjectsByType<ScrollRect>(FindObjectsInactive.Include).FirstOrDefault(item=>item.transform.IsChildOf(overlay) && item.name=="ResearchEraViewport");
         }
         IEnumerator Capture(string name,string mustDifferFrom)
         {

@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.Networking;
 using UnityEngine.UI;
 
@@ -52,7 +53,9 @@ namespace Riverworks
         bool live;
         bool finished;
         int livePlanCalls;
+        int uiProbeCaptureCount;
         int suppressedErrors;
+        UiSmokeViewport smokeViewport;
         readonly List<string> results = new List<string>();
         readonly List<string> errors = new List<string>();
 
@@ -80,6 +83,8 @@ namespace Riverworks
         void OnDestroy()
         {
             Application.logMessageReceived -= OnLog;
+            smokeViewport?.Dispose();
+            smokeViewport = null;
             RestoreGatewayPreference();
         }
 
@@ -249,6 +254,7 @@ namespace Riverworks
                 "gateway preference contains only a safe URL and no key, token, query, or user-info secret");
             Check(!live || livePlanCalls <= 2,
                 "live OpenRouter mode never exceeds two paid plan calls");
+            yield return VerifyResidentAiUiAcrossViewports();
         }
 
         IEnumerator ExerciseSettingsHealth()
@@ -429,6 +435,312 @@ namespace Riverworks
                       stats.duplicateRequestIds == 0 && IsHexRequestId(stats.lastRequestId),
                     "fixture observed JSON content type, string resident IDs, secret-free URLs, and unique request IDs");
             }
+        }
+
+        IEnumerator VerifyResidentAiUiAcrossViewports()
+        {
+            Require(!client.RequestInFlight && !client.EnabledForSession,
+                "final resident AI UI probe starts disabled and cannot issue another provider request");
+            Require(game.CityHud != null && game.CameraRig != null && game.CameraRig.Camera != null,
+                "final resident AI UI probe has the live HUD canvas and main camera");
+            Canvas canvas = game.CityHud.GetComponent<Canvas>();
+            Require(canvas != null && EventSystem.current != null,
+                "resident AI UI probe has a Canvas and EventSystem for projected raycasts");
+
+            client.OpenSettings();
+            yield return new WaitForSecondsRealtime(.3f);
+            Require(game.ModalOpen && FindPanelTransform("ResidentAiOverlay")?.gameObject.activeInHierarchy == true,
+                "resident AI UI probe opens the existing modal without a network request");
+            results.Add("CAPTURE_MODE OFFSCREEN_RENDER_TARGET");
+            results.Add("DEVICE_VALIDATION NOT_RUN - exact render targets do not prove a physical window or Android layout");
+
+            int[,] resolutions = { { 1600, 900 }, { 1280, 720 }, { 1024, 768 }, { 2048, 1536 } };
+            for (int index = 0; index < resolutions.GetLength(0); index++)
+            {
+                int width = resolutions[index, 0];
+                int height = resolutions[index, 1];
+                string size = width + "x" + height;
+                smokeViewport?.Dispose();
+                smokeViewport = new UiSmokeViewport(game.CameraRig.Camera, canvas, width, height);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
+                ScrollRect scroll = FindPanelTransform("ResidentAiContentViewport")?.GetComponent<ScrollRect>();
+                if (scroll != null)
+                {
+                    scroll.StopMovement();
+                    scroll.verticalNormalizedPosition = 1f;
+                }
+                Canvas.ForceUpdateCanvases();
+
+                VerifyResidentAiPanelContracts(canvas, width, height, size);
+                results.Add("VIEWPORT " + size + " CANVAS " +
+                    Mathf.RoundToInt(canvas.pixelRect.width) + "x" + Mathf.RoundToInt(canvas.pixelRect.height) +
+                    " RENDER_TEXTURE " + smokeViewport.Width + "x" + smokeViewport.Height);
+                yield return CaptureUiViewport("resident-ai-ui-" + size + ".png");
+            }
+            Require(uiProbeCaptureCount == 4,
+                "resident AI UI probe writes exactly four requested offscreen resolution captures");
+
+            smokeViewport?.Dispose();
+            smokeViewport = new UiSmokeViewport(game.CameraRig.Camera, canvas, 640, 360);
+            yield return null;
+            Canvas.ForceUpdateCanvases();
+            VerifySmallScrollablePanel(canvas);
+
+            InputField token = FindPanelTransform("ResidentAiGatewayToken")?.GetComponent<InputField>();
+            Button close = FindPanelButton("Button_ResidentAiClose");
+            Require(token != null && close != null, "small UI probe retains the token field and stable close action");
+            token.text = "ui-probe-placeholder";
+            ExecuteProjectedClick(close, canvas, 640, 360);
+            yield return null;
+            Check(!game.ModalOpen && !FindPanelTransform("ResidentAiOverlay").gameObject.activeInHierarchy &&
+                  string.IsNullOrEmpty(token.text),
+                "rendered close action clears the token field, hides the panel, and releases ModalOpen");
+
+            client.OpenSettings();
+            yield return null;
+            Check(game.ModalOpen && string.IsNullOrEmpty(token.text),
+                "reopening resident AI settings never restores the cleared session token text");
+            ExecuteProjectedClick(close, canvas, 640, 360);
+            yield return null;
+            Check(!game.ModalOpen && !client.RequestInFlight,
+                "final UI probe closes without starting health, planning, or provider traffic");
+            results.Add("COVERAGE NOT_APPLICABLE - resident AI is an intentional modal; the 20 percent idle-world limit does not apply");
+            smokeViewport.Dispose();
+            smokeViewport = null;
+        }
+
+        void VerifyResidentAiPanelContracts(Canvas canvas, int width, int height, string size)
+        {
+            RectTransform overlay = FindPanelTransform("ResidentAiOverlay");
+            RectTransform card = FindPanelTransform("ResidentAiCard");
+            RectTransform contentViewport = FindPanelTransform("ResidentAiContentViewport");
+            RectTransform content = FindPanelTransform("ResidentAiContent");
+            Require(overlay != null && card != null && contentViewport != null && content != null,
+                "resident AI overlay, card, fixed header, and scrolling body exist at " + size);
+
+            Rect screen = new Rect(0f, 0f, width, height);
+            Rect cardPixels = ProjectedRect(card, canvas);
+            Check(ContainsRect(screen, cardPixels, 1f) && cardPixels.width <= 680.5f && cardPixels.height <= 520.5f,
+                "resident AI card remains within the exact viewport bounds at " + size);
+            Check(!contentViewport.IsChildOf(content) && content.IsChildOf(contentViewport),
+                "resident AI body content is clipped by its own viewport at " + size);
+            ScrollRect bodyScroll = contentViewport.GetComponent<ScrollRect>();
+            Check(bodyScroll != null && bodyScroll.vertical && !bodyScroll.horizontal &&
+                  ReferenceEquals(bodyScroll.viewport, contentViewport) && ReferenceEquals(bodyScroll.content, content),
+                "resident AI body uses the expected vertical ScrollRect at " + size);
+
+            Text[] labels = card.GetComponentsInChildren<Text>(true);
+            Text title = labels.FirstOrDefault(label => string.Equals(label.text, "주민 AI", StringComparison.Ordinal));
+            Text status = labels.FirstOrDefault(label => label.text != null && label.text.StartsWith("규칙 기반 행동", StringComparison.Ordinal));
+            Require(title != null && status != null, "resident AI title and rule status render at " + size);
+            Check(status.text.IndexOf("규칙 기반 · 규칙 기반 행동", StringComparison.Ordinal) < 0 &&
+                  CountOccurrences(status.text, "규칙 기반") == 1,
+                "resident AI status avoids the duplicated rule-mode phrase at " + size);
+            Check(title.fontSize == HudStyle.TitleSize && labels.Where(label => !ReferenceEquals(label, title))
+                      .All(label => label.fontSize == HudStyle.BodySize) &&
+                  labels.All(label => label.fontStyle == FontStyle.Normal),
+                "resident AI typography uses only 22px title, 11px body, and Normal style at " + size);
+
+            Button close = FindPanelButton("Button_ResidentAiClose");
+            string[] stableNames =
+            {
+                "Button_ResidentAiClose", "Button_ResidentAiConnect", "Button_ResidentAiTest",
+                "Button_ResidentAiPause", "Button_ResidentAiClearMemory"
+            };
+            Require(close != null && stableNames.All(name => FindPanelButton(name) != null),
+                "all existing resident AI button names remain stable at " + size);
+            RectTransform closeRect = close.transform as RectTransform;
+            Image closeIcon = close.GetComponentsInChildren<Image>(true)
+                .FirstOrDefault(image => image.gameObject.name == "Icon");
+            Check(closeRect != null && Mathf.Abs(closeRect.rect.width - HudStyle.TouchSize) <= .5f &&
+                  Mathf.Abs(closeRect.rect.height - HudStyle.TouchSize) <= .5f && closeIcon != null &&
+                  closeIcon.sprite == HudAssets.Icon(HudAssets.CloseIcon),
+                "resident AI close action is a 44px semantic close-icon button at " + size);
+            Check(stableNames.Skip(1).Select(FindPanelButton).All(button =>
+                      button != null && Mathf.Abs(((RectTransform)button.transform).rect.height - HudStyle.TouchSize) <= .5f),
+                "resident AI actions retain the 44px touch height at " + size);
+            Check(IsFirstProjectedRaycast(close, canvas, width, height) &&
+                  IsFirstProjectedRaycast(FindPanelButton("Button_ResidentAiTest"), canvas, width, height),
+                "close and connection-test actions are unobscured EventSystem targets at " + size);
+
+            InputField address = FindPanelTransform("ResidentAiGatewayAddress")?.GetComponent<InputField>();
+            InputField token = FindPanelTransform("ResidentAiGatewayToken")?.GetComponent<InputField>();
+            Text addressLabel = labels.FirstOrDefault(label => string.Equals(label.text, "게이트웨이", StringComparison.Ordinal));
+            Text tokenLabel = labels.FirstOrDefault(label => string.Equals(label.text, "접근 토큰", StringComparison.Ordinal));
+            Require(address != null && token != null && addressLabel != null && tokenLabel != null,
+                "resident AI inputs and their labels exist at " + size);
+            Check(!ProjectedRect(addressLabel.rectTransform, canvas).Overlaps(ProjectedRect((RectTransform)address.transform, canvas)) &&
+                  !ProjectedRect(tokenLabel.rectTransform, canvas).Overlaps(ProjectedRect((RectTransform)token.transform, canvas)) &&
+                  !ProjectedRect((RectTransform)address.transform, canvas).Overlaps(ProjectedRect((RectTransform)token.transform, canvas)),
+                "gateway and token labels do not overlap either input at " + size);
+            Check(token.contentType == InputField.ContentType.Password && string.IsNullOrEmpty(token.text),
+                "token field remains masked and empty at " + size);
+        }
+
+        void VerifySmallScrollablePanel(Canvas canvas)
+        {
+            const string size = "640x360 logical probe";
+            RectTransform card = FindPanelTransform("ResidentAiCard");
+            RectTransform contentViewport = FindPanelTransform("ResidentAiContentViewport");
+            RectTransform content = FindPanelTransform("ResidentAiContent");
+            Button close = FindPanelButton("Button_ResidentAiClose");
+            Button clear = FindPanelButton("Button_ResidentAiClearMemory");
+            ScrollRect scroll = contentViewport == null ? null : contentViewport.GetComponent<ScrollRect>();
+            Require(card != null && contentViewport != null && content != null && close != null && clear != null && scroll != null,
+                "small logical resident AI panel retains its fixed header and scrolling body");
+            Rect screen = new Rect(0f, 0f, 640f, 360f);
+            Rect cardPixels = ProjectedRect(card, canvas);
+            Rect closeBefore = ProjectedRect((RectTransform)close.transform, canvas);
+            Check(ContainsRect(screen, cardPixels, 1f) && closeBefore.width >= 43.5f && closeBefore.height >= 43.5f &&
+                  !close.transform.IsChildOf(contentViewport),
+                "small logical panel keeps the 44px close header fixed inside card bounds");
+            Check(content.rect.height > contentViewport.rect.height && scroll.vertical,
+                "small logical panel exposes overflow through its vertical body ScrollRect");
+
+            scroll.StopMovement();
+            scroll.verticalNormalizedPosition = 0f;
+            Canvas.ForceUpdateCanvases();
+            Rect closeAfter = ProjectedRect((RectTransform)close.transform, canvas);
+            Rect clearPixels = ProjectedRect((RectTransform)clear.transform, canvas);
+            Rect viewportPixels = ProjectedRect(contentViewport, canvas);
+            Check(Vector2.Distance(closeBefore.center, closeAfter.center) <= .5f,
+                "small logical panel header does not move when the body scrolls");
+            Check(ContainsRect(viewportPixels, clearPixels, 1.5f) && IsFirstProjectedRaycast(clear, canvas, 640, 360),
+                "scrolling to the bottom exposes the lower session-memory action as the first raycast target");
+            Check(IsFirstProjectedRaycast(close, canvas, 640, 360),
+                "fixed close action remains raycastable after the small panel body scrolls");
+            results.Add("VIEWPORT " + size + " CANVAS " + Mathf.RoundToInt(canvas.pixelRect.width) + "x" +
+                Mathf.RoundToInt(canvas.pixelRect.height) + " RENDER_TEXTURE 640x360 CAPTURE_NOT_REQUESTED");
+        }
+
+        IEnumerator CaptureUiViewport(string name)
+        {
+            yield return new WaitForSecondsRealtime(.3f);
+            Texture2D texture = null;
+            try
+            {
+                texture = smokeViewport.Capture();
+                Require(texture != null && texture.width == smokeViewport.Width && texture.height == smokeViewport.Height,
+                    "resident AI offscreen capture has the requested exact size: " + name);
+                Require(VisibleFrame(texture), "resident AI offscreen capture contains visible UI and world pixels: " + name);
+                File.WriteAllBytes(Path.Combine(output, name), texture.EncodeToPNG());
+                uiProbeCaptureCount++;
+                results.Add("CAPTURE " + name + " " + texture.width + "x" + texture.height + " OFFSCREEN_RENDER_TARGET");
+            }
+            finally
+            {
+                if (texture != null) Destroy(texture);
+            }
+        }
+
+        void ExecuteProjectedClick(Button button, Canvas canvas, int width, int height)
+        {
+            Require(button != null && button.gameObject.activeInHierarchy && button.interactable,
+                "projected UI click has an active interactable button");
+            PointerEventData pointer = PointerAtProjectedCenter(button, canvas, width, height);
+            var hits = new List<RaycastResult>();
+            EventSystem.current.RaycastAll(pointer, hits);
+            Require(hits.Count > 0 && IsButtonHit(button, hits[0].gameObject),
+                "projected button is the first EventSystem raycast target before click");
+            ExecuteEvents.ExecuteHierarchy(hits[0].gameObject, pointer, ExecuteEvents.pointerClickHandler);
+        }
+
+        bool IsFirstProjectedRaycast(Button button, Canvas canvas, int width, int height)
+        {
+            if (button == null || !button.gameObject.activeInHierarchy || !button.interactable || EventSystem.current == null)
+                return false;
+            try
+            {
+                PointerEventData pointer = PointerAtProjectedCenter(button, canvas, width, height);
+                var hits = new List<RaycastResult>();
+                EventSystem.current.RaycastAll(pointer, hits);
+                return hits.Count > 0 && IsButtonHit(button, hits[0].gameObject);
+            }
+            catch { return false; }
+        }
+
+        static PointerEventData PointerAtProjectedCenter(Button button, Canvas canvas, int width, int height)
+        {
+            Rect projected = ProjectedRect((RectTransform)button.transform, canvas);
+            Vector2 center = projected.center;
+            if (projected.width < 1f || projected.height < 1f || center.x < 0f || center.x > width ||
+                center.y < 0f || center.y > height)
+                throw new InvalidOperationException("Button has no visible projected rect: " + button.name);
+            return new PointerEventData(EventSystem.current)
+            {
+                position = center,
+                button = PointerEventData.InputButton.Left,
+                clickCount = 1
+            };
+        }
+
+        static Rect ProjectedRect(RectTransform rect, Canvas canvas)
+        {
+            if (rect == null || canvas == null) return default;
+            var corners = new Vector3[4];
+            rect.GetWorldCorners(corners);
+            Camera eventCamera = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
+            Vector2 first = RectTransformUtility.WorldToScreenPoint(eventCamera, corners[0]);
+            float minX = first.x, maxX = first.x, minY = first.y, maxY = first.y;
+            for (int index = 1; index < corners.Length; index++)
+            {
+                Vector2 point = RectTransformUtility.WorldToScreenPoint(eventCamera, corners[index]);
+                minX = Mathf.Min(minX, point.x);
+                maxX = Mathf.Max(maxX, point.x);
+                minY = Mathf.Min(minY, point.y);
+                maxY = Mathf.Max(maxY, point.y);
+            }
+            return Rect.MinMaxRect(minX, minY, maxX, maxY);
+        }
+
+        static bool ContainsRect(Rect outer, Rect inner, float tolerance)
+        {
+            return inner.xMin >= outer.xMin - tolerance && inner.yMin >= outer.yMin - tolerance &&
+                   inner.xMax <= outer.xMax + tolerance && inner.yMax <= outer.yMax + tolerance;
+        }
+
+        static bool IsButtonHit(Button button, GameObject hit)
+        {
+            return hit == button.gameObject || hit.transform.IsChildOf(button.transform);
+        }
+
+        Button FindPanelButton(string name)
+        {
+            return game?.CityHud == null ? null : game.CityHud.GetComponentsInChildren<Button>(true)
+                .FirstOrDefault(button => button.name == name);
+        }
+
+        RectTransform FindPanelTransform(string name)
+        {
+            return game?.CityHud == null ? null : game.CityHud.GetComponentsInChildren<RectTransform>(true)
+                .FirstOrDefault(item => item.name == name);
+        }
+
+        static int CountOccurrences(string value, string search)
+        {
+            if (string.IsNullOrEmpty(value) || string.IsNullOrEmpty(search)) return 0;
+            int count = 0;
+            for (int at = 0; (at = value.IndexOf(search, at, StringComparison.Ordinal)) >= 0; at += search.Length)
+                count++;
+            return count;
+        }
+
+        static bool VisibleFrame(Texture2D texture)
+        {
+            if (texture == null || texture.width < 320 || texture.height < 180) return false;
+            Color32[] pixels = texture.GetPixels32();
+            int stride = Mathf.Max(1, pixels.Length / 4096);
+            int samples = 0, lit = 0;
+            var colors = new HashSet<int>();
+            for (int index = 0; index < pixels.Length; index += stride)
+            {
+                Color32 pixel = pixels[index];
+                samples++;
+                if (pixel.r + pixel.g + pixel.b >= 24) lit++;
+                colors.Add((pixel.r >> 4) << 8 | (pixel.g >> 4) << 4 | (pixel.b >> 4));
+            }
+            return lit >= samples / 20 && colors.Count >= 16;
         }
 
         void VerifyUsageTelemetry()
@@ -612,6 +924,8 @@ namespace Riverworks
             finished = true;
             game?.SetSpeed(0f);
             client?.SetEnabled(false);
+            smokeViewport?.Dispose();
+            smokeViewport = null;
             Application.logMessageReceived -= OnLog;
             RestoreGatewayPreference();
             int exitCode = errors.Count == 0 && suppressedErrors == 0 ? 0 : 1;

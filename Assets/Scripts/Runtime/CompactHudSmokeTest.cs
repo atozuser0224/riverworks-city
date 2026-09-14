@@ -113,17 +113,22 @@ namespace Riverworks
             }
 
             VerifyHudAssets();
+            results.Add("CAPTURE_MODE OFFSCREEN_RENDER_TARGET");
+            results.Add("DEVICE_VALIDATION NOT_RUN - virtual renders do not prove a native window or Android layout");
 
-            int[,] resolutions = { { 1600, 900 }, { 1280, 720 } };
+            int[,] resolutions = { { 1600, 900 }, { 1280, 720 }, { 1024, 768 }, { 2048, 1536 } };
             for (int resolution = 0; resolution < resolutions.GetLength(0); resolution++)
             {
                 int width = resolutions[resolution, 0];
                 int height = resolutions[resolution, 1];
                 string size = width + "x" + height;
-                Screen.SetResolution(width, height, FullScreenMode.Windowed);
-                yield return new WaitForSecondsRealtime(.45f);
-                yield return new WaitForEndOfFrame();
+                smokeViewport?.Dispose();
+                smokeViewport = new UiSmokeViewport(game.CameraRig.Camera, hud.GetComponent<Canvas>(), width, height);
+                yield return null;
+                Canvas.ForceUpdateCanvases();
 
+                VerifyPolishedHudContracts(size);
+                if (resolution == 0) yield return VerifyEarlyStateContracts(size);
                 VerifyCompactChrome(size);
                 VerifyIdleState(size);
                 MeasureCoverage("idle-" + size, .20f);
@@ -136,14 +141,21 @@ namespace Riverworks
                 SelectFixtureHouse(size);
                 yield return new WaitForEndOfFrame();
                 Require(IsActive("Inspector"), "building selection alone opens the inspector at " + size);
+                VerifyInspectorPowerRows(false, size + " house");
                 MeasureCoverage("selected-" + size, .30f);
                 yield return Capture(size + "-01-building-selection.png");
                 CloseInspectorThroughUi("building selection at " + size);
+
+                game.InteractCell(SharedCityScenario.RockX, 9);
+                yield return new WaitForEndOfFrame();
+                VerifyInspectorPowerRows(true, size + " windmill");
+                CloseInspectorThroughUi("powered building selection at " + size);
 
                 Click("Button_주거");
                 yield return new WaitForEndOfFrame();
                 Require(IsActive("BuildChoices"), "requesting the housing category expands build choices at " + size);
                 Require(IsButtonFirstHit("Button_주택"), "the housing choice is visible and raycastable at " + size);
+                yield return VerifyBuildTooltip(size);
                 yield return Capture(size + "-02-build-tray.png");
                 Click("Button_BuildCollapse");
                 yield return new WaitForEndOfFrame();
@@ -182,6 +194,7 @@ namespace Riverworks
                     "factory configuration opens as a modal at " + size);
                 Require(game.IsScreenPointOverUI(ScreenCenter),
                     "factory configuration blocks the central world at " + size);
+                VerifyFactoryConfigureLayout(size);
                 yield return Capture(size + "-08-factory-configure.png");
                 Click("Button_FactoryConfigureClose");
                 yield return new WaitForEndOfFrame();
@@ -194,6 +207,7 @@ namespace Riverworks
                 Require(game.ResearchOpen && IsActive("ResearchOverlay"),
                     "research opens through its compact top-bar button at " + size);
                 Require(game.IsScreenPointOverUI(ScreenCenter), "research blocks the central world at " + size);
+                VerifyResearchWindowBounds(size);
                 VerifyAllResearchAccessible(size);
                 yield return Capture(size + "-09-research.png");
                 Click("Button_ResearchClose");
@@ -312,11 +326,340 @@ namespace Riverworks
             yield return new WaitForEndOfFrame();
             Require(game.ModalOpen && IsActive(rootName), label + " appears only after its button is requested at " + size);
             Require(game.IsScreenPointOverUI(ScreenCenter), label + " blocks the central world at " + size);
+            if (label == "Trade") VerifyTradeState(size);
+            else if (label == "Territory") VerifyTerritoryReasons(size);
             yield return Capture(size + "-04-utility-" + label.ToLowerInvariant() + ".png");
             Click(closeButton);
             yield return new WaitForEndOfFrame();
             Require(!game.ModalOpen && !IsActive(rootName),
                 label + " closes through its rendered button and clears ModalOpen at " + size);
+        }
+
+        void VerifyPolishedHudContracts(string size)
+        {
+            Canvas canvas = hud.GetComponent<Canvas>();
+            CanvasScaler scaler = hud.GetComponent<CanvasScaler>();
+            int expectedScale = HudStyle.IntegerScale(FrameWidth, FrameHeight, Screen.dpi, Application.isMobilePlatform);
+            Require(canvas != null && scaler != null && scaler.uiScaleMode == CanvasScaler.ScaleMode.ConstantPixelSize &&
+                    Mathf.Approximately(scaler.scaleFactor, expectedScale),
+                "HUD uses the expected integer ConstantPixelSize scale at " + size + " (" + expectedScale + "x)");
+
+            Text[] labels = hud.GetComponentsInChildren<Text>(true);
+            Require(labels.Length > 40 && labels.All(label =>
+                    (label.fontSize == HudStyle.BodySize || label.fontSize == HudStyle.TitleSize) &&
+                    label.fontStyle == FontStyle.Normal),
+                "all " + labels.Length + " HUD labels use 11/22 pixel normal type at " + size);
+
+            Button[] activeButtons = hud.GetComponentsInChildren<Button>(false);
+            Require(activeButtons.Length >= 15 && activeButtons.All(button =>
+            {
+                RectTransform rect = button.transform as RectTransform;
+                return rect != null && rect.rect.width >= HudStyle.TouchSize - .5f &&
+                       rect.rect.height >= HudStyle.TouchSize - .5f;
+            }), "all " + activeButtons.Length + " active HUD buttons meet the 44 pixel touch target at " + size);
+
+            ScrollRect[] scrolls = hud.GetComponentsInChildren<ScrollRect>(true);
+            Require(scrolls.Length >= 8 && scrolls.All(scroll => scroll.viewport != null &&
+                    scroll.viewport.GetComponent<RectMask2D>() != null),
+                "all " + scrolls.Length + " HUD scroll regions have explicit masked viewports at " + size);
+
+            Button selectedCategory = FindButton("Button_주거");
+            Button territory = FindButton("Button_Territory");
+            Button removal = FindButton("Button_철거");
+            Require(ButtonColorIs(selectedCategory, HudStyle.Accent) && ButtonColorIs(territory, HudStyle.SurfaceRaised) &&
+                    ButtonColorIs(removal, HudStyle.SurfaceRaised),
+                "palette color distinguishes the selected category without persistent utility or removal emphasis at " + size);
+
+            Button research = FindButton("Button_기술 연구");
+            Text[] researchLines = research == null ? Array.Empty<Text>() : research.GetComponentsInChildren<Text>(false);
+            Require(research != null && researchLines.Length == 2 && researchLines.All(text =>
+                    TextRenderFits(text, research.transform as RectTransform, true, out _)),
+                "both top-bar research lines have visible rendered width and height inside their button at " + size);
+
+            Require(hud.VerifyLayout(out string reason), "HUD VerifyLayout passes at " + size + ": " + reason);
+        }
+
+        IEnumerator VerifyEarlyStateContracts(string size)
+        {
+            GameState early = GameState.CreateNew();
+            early.Technologies.Clear();
+            early.Stock[(int)Resource.Ore] = 0;
+            early.Stock[(int)Resource.Steel] = 0;
+            early.Stock[(int)Resource.Tools] = 0;
+            Require(SaveStore.TrySave(game.SavePath, early, out string earlySaveError),
+                "early-state UI fixture saves: " + earlySaveError);
+            game.LoadGame();
+            yield return null;
+            Canvas.ForceUpdateCanvases();
+
+            Require(!IsActive("Ore") && !IsActive("Steel") && !IsActive("Tools"),
+                "advanced resource chips start hidden in an early city at " + size);
+
+            TechId oreUnlock = TechCatalog.RequiredTechnology(BuildingKind.Mine);
+            game.State.Technologies.Add(oreUnlock);
+            game.NotifyWorldSelection();
+            yield return null;
+            Require(IsActive("Ore"), "unlocking the mine reveals the ore resource chip at " + size);
+            game.State.Technologies.Remove(oreUnlock);
+            game.NotifyWorldSelection();
+            yield return null;
+            Require(IsActive("Ore"), "an advanced resource chip remains sticky after first reveal at " + size);
+
+            game.ToggleResearch();
+            yield return null;
+            Canvas.ForceUpdateCanvases();
+            foreach (TechId id in new[] { TechId.Stonecraft, TechId.CropRotation })
+            {
+                Button button = FindButton("Button_연구 시작_" + id);
+                RectTransform card = Root("TechCard_" + id) as RectTransform;
+                ScrollRect scroll = card == null ? null : card.GetComponentInParent<ScrollRect>();
+                if (scroll != null) scroll.verticalNormalizedPosition = 1f;
+                Canvas.ForceUpdateCanvases();
+                Text effect = Root("TechEffect_" + id) == null ? null : Root("TechEffect_" + id).GetComponent<Text>();
+                Require(button != null && button.gameObject.activeInHierarchy && button.interactable &&
+                        card != null && scroll != null && ContainsRect(scroll.viewport, card, 1f) &&
+                        effect != null && effect.gameObject.activeInHierarchy &&
+                        card.rect.height >= 183.5f && card.rect.height + .5f >= effect.preferredHeight + 84f &&
+                        TextRenderFits(effect, card, false, out _),
+                    id + " is an available, initially visible research action in the early-state fixture at " + size);
+            }
+            game.ToggleResearch();
+
+            Require(SaveStore.TrySave(game.SavePath, game.State, out string resetSaveError),
+                "early-state resource reset fixture saves: " + resetSaveError);
+            game.LoadGame();
+            yield return null;
+            Require(!IsActive("Ore"), "loading a new state reference resets sticky advanced-resource visibility at " + size);
+
+            GameState rich = SharedCityScenario.Create();
+            Require(SaveStore.TrySave(game.SavePath, rich, out string richSaveError),
+                "shared city is restored after early-state UI verification: " + richSaveError);
+            game.LoadGame();
+            game.CameraRig.Home();
+            game.CameraRig.SetZoom(6.3f);
+            game.RefreshWorld(true);
+            yield return new WaitForSecondsRealtime(.35f);
+            Canvas.ForceUpdateCanvases();
+        }
+
+        IEnumerator VerifyBuildTooltip(string size)
+        {
+            Button house = FindButton("Button_주택");
+            HudTooltipTrigger trigger = house == null ? null : house.GetComponent<HudTooltipTrigger>();
+            Require(trigger != null && !string.IsNullOrEmpty(trigger.TooltipText),
+                "housing choice exposes a tooltip trigger and descriptive content at " + size);
+
+            var mouse = new PointerEventData(EventSystem.current) { pointerId = -1 };
+            trigger.OnPointerEnter(mouse);
+            Require(IsActive("BuildTooltip"), "mouse hover reveals the construction tooltip at " + size);
+            trigger.OnPointerExit(mouse);
+            Require(!IsActive("BuildTooltip"), "pointer exit hides the construction tooltip at " + size);
+
+            game.SelectTool(BuildingKind.None);
+            var touch = new PointerEventData(EventSystem.current)
+                { pointerId = 0, button = PointerEventData.InputButton.Left };
+            trigger.OnPointerDown(touch);
+            yield return new WaitForSecondsRealtime(HudTooltipTrigger.LongPressSeconds + .08f);
+            Require(trigger.ConsumeClick && IsActive("BuildTooltip"),
+                "unscaled long press reveals the construction tooltip and consumes its click at " + size);
+            house.onClick.Invoke();
+            Require(game.SelectedTool == BuildingKind.None,
+                "consumed long press does not accidentally select a construction tool at " + size);
+            trigger.OnPointerUp(touch);
+            trigger.OnPointerClick(touch);
+        }
+
+        void VerifyInspectorPowerRows(bool expected, string phase)
+        {
+            Transform rows = Root("InspectorRows");
+            RectTransform rowsRect = rows as RectTransform;
+            RectTransform viewport = rows == null ? null : rows.parent as RectTransform;
+            bool shown = rows != null && rows.GetComponentsInChildren<Text>(false).Any(text => text.text == "전력");
+            Require(shown == expected, "inspector power row is " + (expected ? "shown" : "omitted") + " for " + phase);
+            Require(rowsRect != null && viewport != null && rowsRect.rect.width <= viewport.rect.width + 1f &&
+                    Mathf.Abs(rowsRect.sizeDelta.x) <= .5f,
+                "inspector row content uses the viewport width without horizontal mask overflow for " + phase);
+            RectTransform[] activeRows = rows == null ? Array.Empty<RectTransform>() : rows.Cast<Transform>()
+                .Where(row => row.gameObject.activeInHierarchy).Select(row => row as RectTransform).ToArray();
+            Require(activeRows.Length > 0, "inspector exposes structured rows for " + phase);
+            foreach (RectTransform row in activeRows)
+            {
+                Text[] cells = row.GetComponentsInChildren<Text>(false);
+                string labelReason = "missing", valueReason = "missing";
+                bool labelFits = cells.Length == 2 && TextRenderFits(cells[0], row, true, out labelReason);
+                bool valueFits = cells.Length == 2 && TextRenderFits(cells[1], row, false, out valueReason);
+                Require(labelFits && valueFits &&
+                        NonOverlappingHorizontalCells(row, cells[0].rectTransform, cells[1].rectTransform) &&
+                        HorizontallyContained(viewport, row, .75f) &&
+                        HorizontallyContained(viewport, cells[0].rectTransform, .75f),
+                    "inspector label/value render inside their row for " + phase + " " + row.name +
+                    " (label " + labelReason + ", value " + valueReason + ")");
+            }
+        }
+
+        void VerifyTradeState(string size)
+        {
+            Transform root = Root("TradeOverlay");
+            Require(root != null && root.GetComponentsInChildren<Text>(false).Any(text => text.text.StartsWith("보유 코인")),
+                "trade panel shows current coin holdings at " + size);
+            RectTransform card = Root("TradeCard") as RectTransform;
+            Text holdings = Root("TradeHoldingsHeader") == null ? null : Root("TradeHoldingsHeader").GetComponent<Text>();
+            string headerReason = "missing";
+            bool headerFits = holdings != null && TextRenderFits(holdings, card, true, out headerReason);
+            Require(card != null && holdings != null && holdings.transform.parent == card && holdings.gameObject.activeInHierarchy &&
+                    headerFits,
+                "fixed trade holdings header remains visible inside its card at " + size + " (" + headerReason + ")");
+            Resource[] resources = { Resource.Timber, Resource.Stone, Resource.Grain, Resource.Flour,
+                Resource.Bread, Resource.Ore, Resource.Steel, Resource.Tools };
+            foreach (Resource resource in resources)
+            {
+                Button buy = FindButton("Button_MobileBuy_" + resource);
+                Button sell = FindButton("Button_MobileSell_" + resource);
+                bool canBuy = game.State.Coins >= GameController.TradePrice(resource) * 10;
+                bool canSell = game.Sim.Get(resource) >= 10;
+                Require(buy != null && sell != null && buy.interactable == canBuy && sell.interactable == canSell,
+                    "trade buy/sell availability follows coin and " + resource + " holdings at " + size);
+            }
+        }
+
+        void VerifyTerritoryReasons(string size)
+        {
+            Button[] regions = Enumerable.Range(1, 9).Select(index => FindButton("Button_Region_" + index)).ToArray();
+            Require(regions.All(button => button != null), "all nine territory actions exist at " + size);
+            foreach (Button button in regions.Where(button => !button.interactable))
+            {
+                string label = button.GetComponentInChildren<Text>().text;
+                Require(label.Contains("보유") || label.Contains("인접 필요") || label.Contains("코인 부족"),
+                    button.name + " explains why it is unavailable at " + size);
+            }
+        }
+
+        void VerifyFactoryConfigureLayout(string size)
+        {
+            RectTransform window = Root("FactoryConfigureCard") as RectTransform;
+            Transform recipe = Root("FactoryRecipeSection");
+            Require(window != null && recipe != null && recipe.gameObject.activeInHierarchy &&
+                    recipe.GetComponent<HorizontalLayoutGroup>() != null,
+                "assembler configuration uses its horizontal recipe layout at " + size);
+            Canvas.ForceUpdateCanvases();
+            Button[] recipes = recipe.GetComponentsInChildren<Button>(false).OrderBy(button =>
+                ((RectTransform)button.transform).anchoredPosition.x).ToArray();
+            Require(recipes.Length == 3 && AdjacentWithoutHole(recipe as RectTransform, recipes),
+                "assembler recipe row contains three compatible choices without a blank slot at " + size);
+            float recipeHeight = window.rect.height;
+
+            Require(game.Factory.SelectAt(18, 16), "fixture inserter is selectable for configuration layout at " + size);
+            Canvas.ForceUpdateCanvases();
+            Transform filter = Root("FactoryFilterSection");
+            float filterHeight = window.rect.height;
+            Require(filter != null && filter.gameObject.activeInHierarchy && filter.GetComponent<GridLayoutGroup>() != null &&
+                    filter.GetComponentsInChildren<Button>(false).Length == 9,
+                "inserter configuration uses a dense nine-filter grid at " + size);
+
+            Require(game.Factory.SelectAt(22, 24), "fixture storage is selectable for configuration layout at " + size);
+            Canvas.ForceUpdateCanvases();
+            Transform feed = Root("FactoryFeedSection");
+            float feedHeight = window.rect.height;
+            Require(feed != null && feed.gameObject.activeInHierarchy && feed.GetComponent<GridLayoutGroup>() != null &&
+                    feed.GetComponentsInChildren<Button>(false).Length == 8 && filterHeight > feedHeight && feedHeight > recipeHeight,
+                "factory configuration height follows filter, feed, and recipe content at " + size);
+
+            Require(game.Factory.SelectAt(SharedCityScenario.ProcessorMicroX, SharedCityScenario.ProcessorMicroZ),
+                "fixture assembler selection is restored after configuration layout checks at " + size);
+            Canvas.ForceUpdateCanvases();
+        }
+
+        void VerifyResearchWindowBounds(string size)
+        {
+            RectTransform canvas = hud.transform as RectTransform;
+            RectTransform window = Root("ResearchCard") as RectTransform;
+            Require(canvas != null && window != null && ContainsRect(canvas, window, 1f),
+                "research window remains inside the HUD canvas at " + size);
+            Vector3[] corners = new Vector3[4];
+            window.GetWorldCorners(corners);
+            float minimum = float.MaxValue, maximum = float.MinValue;
+            foreach (Vector3 corner in corners)
+            {
+                float y = canvas.InverseTransformPoint(corner).y;
+                minimum = Mathf.Min(minimum, y); maximum = Mathf.Max(maximum, y);
+            }
+            Require(minimum >= canvas.rect.yMin + 68f - 1f && maximum <= canvas.rect.yMax - 60f + 1f,
+                "research window respects the top 60 and bottom 68 HUD reservations at " + size);
+        }
+
+        static bool ButtonColorIs(Button button, Color expected) => button != null && button.targetGraphic != null &&
+            ColorDistance(button.targetGraphic.color, expected) <= .01f;
+
+        static float ColorDistance(Color first, Color second) => Mathf.Max(Mathf.Abs(first.r - second.r),
+            Mathf.Abs(first.g - second.g), Mathf.Abs(first.b - second.b));
+
+        static bool TextRenderFits(Text text, RectTransform container, bool requireSingleLine, out string reason)
+        {
+            if (text == null || container == null)
+            {
+                reason = "missing text or container";
+                return false;
+            }
+            RectTransform rect = text.rectTransform;
+            float renderedWidth = rect.rect.width;
+            float renderedHeight = rect.rect.height;
+            float preferredWidth = text.preferredWidth;
+            float preferredHeight = text.preferredHeight;
+            bool positiveArea = renderedWidth > .5f && renderedHeight > .5f;
+            bool heightFits = preferredHeight <= renderedHeight + .75f;
+            bool widthFits = !requireSingleLine || preferredWidth <= renderedWidth + .75f;
+            bool oneLine = !requireSingleLine || !text.text.Contains("\n");
+            bool contained = ContainsRect(container, rect, .75f);
+            reason = "rect " + renderedWidth.ToString("0.#") + "x" + renderedHeight.ToString("0.#") +
+                ", preferred " + preferredWidth.ToString("0.#") + "x" + preferredHeight.ToString("0.#");
+            return positiveArea && heightFits && widthFits && oneLine && contained;
+        }
+
+        static bool NonOverlappingHorizontalCells(RectTransform row, RectTransform label, RectTransform value)
+        {
+            if (row == null || label == null || value == null) return false;
+            Vector3[] labelCorners = new Vector3[4], valueCorners = new Vector3[4];
+            label.GetWorldCorners(labelCorners); value.GetWorldCorners(valueCorners);
+            float labelMaximum = labelCorners.Max(corner => row.InverseTransformPoint(corner).x);
+            float valueMinimum = valueCorners.Min(corner => row.InverseTransformPoint(corner).x);
+            return labelMaximum <= valueMinimum + .75f;
+        }
+
+        static bool HorizontallyContained(RectTransform parent, RectTransform child, float tolerance)
+        {
+            if (parent == null || child == null) return false;
+            Vector3[] corners = new Vector3[4]; child.GetWorldCorners(corners);
+            float minimum = corners.Min(corner => parent.InverseTransformPoint(corner).x);
+            float maximum = corners.Max(corner => parent.InverseTransformPoint(corner).x);
+            return minimum >= parent.rect.xMin - tolerance && maximum <= parent.rect.xMax + tolerance;
+        }
+
+        static bool ContainsRect(RectTransform parent, RectTransform child, float tolerance)
+        {
+            if (parent == null || child == null) return false;
+            Rect rect = parent.rect;
+            Vector3[] corners = new Vector3[4]; child.GetWorldCorners(corners);
+            return corners.All(corner =>
+            {
+                Vector3 point = parent.InverseTransformPoint(corner);
+                return point.x >= rect.xMin - tolerance && point.x <= rect.xMax + tolerance &&
+                       point.y >= rect.yMin - tolerance && point.y <= rect.yMax + tolerance;
+            });
+        }
+
+        static bool AdjacentWithoutHole(RectTransform parent, IList<Button> buttons)
+        {
+            if (parent == null || buttons == null || buttons.Count == 0) return false;
+            float previousMax = float.MinValue;
+            foreach (Button button in buttons)
+            {
+                Vector3[] corners = new Vector3[4]; ((RectTransform)button.transform).GetWorldCorners(corners);
+                float minimum = corners.Min(corner => parent.InverseTransformPoint(corner).x);
+                float maximum = corners.Max(corner => parent.InverseTransformPoint(corner).x);
+                if (previousMax > float.MinValue && (minimum < previousMax - 1f || minimum - previousMax > 16f)) return false;
+                previousMax = maximum;
+            }
+            return true;
         }
 
         void VerifyCompactChrome(string size)
@@ -478,12 +821,13 @@ namespace Riverworks
             foreach (TechSpec spec in specs)
             {
                 Button button = FindButton("Button_연구 시작_" + spec.Id);
-                if (button == null)
+                RectTransform card = Root("TechCard_" + spec.Id) as RectTransform;
+                if (button == null || card == null)
                 {
-                    RecordError("Missing research button for " + spec.Id + " at " + size);
+                    RecordError("Missing research card or stable button for " + spec.Id + " at " + size);
                     continue;
                 }
-                ScrollRect scroll = button.GetComponentInParent<ScrollRect>();
+                ScrollRect scroll = card.GetComponentInParent<ScrollRect>();
                 bool reached = false;
                 if (scroll != null)
                 {
@@ -492,14 +836,40 @@ namespace Riverworks
                         scroll.StopMovement();
                         scroll.verticalNormalizedPosition = 1f - step / 32f;
                         Canvas.ForceUpdateCanvases();
-                        reached = IsFirstRaycastTarget(button);
+                        reached = ContainsRect(scroll.viewport, card, 1.5f);
                     }
                 }
-                else reached = IsFirstRaycastTarget(button);
+                bool completed = TechCatalog.Has(game.State, spec.Id);
+                if (completed)
+                {
+                    Text effect = Root("TechEffect_" + spec.Id) == null ? null : Root("TechEffect_" + spec.Id).GetComponent<Text>();
+                    Check(!button.gameObject.activeSelf && card.rect.height <= 82.5f && effect != null &&
+                          effect.gameObject.activeInHierarchy && TextRenderFits(effect, card, true, out _) &&
+                          scroll != null && ContainsRect(scroll.viewport, effect.rectTransform, 1.5f),
+                        "completed research card is compact and keeps one unclipped effect line: " + spec.Id + " at " + size);
+                }
+                else
+                {
+                    RectTransform rect = button.transform as RectTransform;
+                    Check(button.gameObject.activeSelf && rect != null && rect.rect.width >= 200f &&
+                          rect.rect.height >= HudStyle.TouchSize - .5f,
+                        "available or locked research card retains a full-width action: " + spec.Id + " at " + size);
+                }
                 if (reached) accessible++;
-                else RecordError("Research button cannot be reached by scrolling and raycast: " + spec.Id + " at " + size);
+                else RecordError("Research card cannot be reached by its internal scroll viewport: " + spec.Id + " at " + size);
             }
-            Require(accessible == 18, "all 18 research cards are reachable and raycastable at " + size + " (18/18)");
+            Require(accessible == 18, "all 18 research cards are reachable through their internal scroll views at " + size + " (18/18)");
+            Transform research = Root("ResearchOverlay");
+            if (research != null)
+            {
+                foreach (ScrollRect scroll in research.GetComponentsInChildren<ScrollRect>(true))
+                {
+                    scroll.StopMovement();
+                    if (scroll.vertical) scroll.verticalNormalizedPosition = 1f;
+                    if (scroll.horizontal) scroll.horizontalNormalizedPosition = 0f;
+                }
+                Canvas.ForceUpdateCanvases();
+            }
         }
 
         void CloseInspectorThroughUi(string phase)
@@ -519,8 +889,8 @@ namespace Riverworks
             for (int column = 0; column < CoverageColumns; column++)
             {
                 Vector2 sample = new Vector2(
-                    (column + .5f) * Screen.width / CoverageColumns,
-                    (row + .5f) * Screen.height / CoverageRows);
+                    (column + .5f) * FrameWidth / CoverageColumns,
+                    (row + .5f) * FrameHeight / CoverageRows);
                 if (game.IsScreenPointOverUI(sample)) blocked++;
             }
             float fraction = blocked / (float)total;
@@ -573,9 +943,15 @@ namespace Riverworks
             if (rect == null) throw new InvalidOperationException("Button has no RectTransform: " + button.name);
             Vector3[] corners = new Vector3[4];
             rect.GetWorldCorners(corners);
-            Vector2 center = new Vector2((corners[0].x + corners[2].x) * .5f, (corners[0].y + corners[2].y) * .5f);
-            if (corners[2].x - corners[0].x < 1 || corners[2].y - corners[0].y < 1 ||
-                center.x < 0 || center.x > Screen.width || center.y < 0 || center.y > Screen.height)
+            Canvas canvas = button.GetComponentInParent<Canvas>();
+            Camera eventCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
+            Vector3 worldCenter = (corners[0] + corners[2]) * .5f;
+            Vector2 center = RectTransformUtility.WorldToScreenPoint(eventCamera, worldCenter);
+            Vector2 minimum = RectTransformUtility.WorldToScreenPoint(eventCamera, corners[0]);
+            Vector2 maximum = RectTransformUtility.WorldToScreenPoint(eventCamera, corners[2]);
+            Vector2 dimensions = canvas == null ? new Vector2(Screen.width, Screen.height) : HudStyle.PixelDimensions(canvas);
+            if (maximum.x - minimum.x < 1 || maximum.y - minimum.y < 1 ||
+                center.x < 0 || center.x > dimensions.x || center.y < 0 || center.y > dimensions.y)
                 throw new InvalidOperationException("Button has no visible screen rect: " + button.name);
             return new PointerEventData(EventSystem.current) { position = center, button = PointerEventData.InputButton.Left };
         }
@@ -593,9 +969,13 @@ namespace Riverworks
         }
 
         bool VisibleWorldPoint(Vector3 point) => point.z > 0 && point.x >= 1 && point.y >= 1 &&
-            point.x < Screen.width - 1 && point.y < Screen.height - 1;
+            point.x < FrameWidth - 1 && point.y < FrameHeight - 1;
 
-        Vector2 ScreenCenter => new Vector2(Screen.width * .5f, Screen.height * .5f);
+        int FrameWidth => smokeViewport == null ? Screen.width : smokeViewport.Width;
+        int FrameHeight => smokeViewport == null ? Screen.height : smokeViewport.Height;
+        Vector2 ScreenCenter => smokeViewport == null
+            ? new Vector2(Screen.width * .5f, Screen.height * .5f)
+            : smokeViewport.Center;
 
         IEnumerator Capture(string name)
         {
@@ -619,7 +999,7 @@ namespace Riverworks
                     texture = smokeViewport == null
                         ? ScreenCapture.CaptureScreenshotAsTexture()
                         : smokeViewport.Capture();
-                    if (baselineCaptureOnly && (texture == null || texture.width != smokeViewport.Width ||
+                    if (smokeViewport != null && (texture == null || texture.width != smokeViewport.Width ||
                         texture.height != smokeViewport.Height))
                     {
                         string actual = texture == null ? "null" : texture.width + "x" + texture.height;
@@ -678,8 +1058,11 @@ namespace Riverworks
             game.SetSpeed(1);
             for (int index = 0; index < 24; index++)
             {
-                yield return new WaitForEndOfFrame();
-                Texture2D frame = ScreenCapture.CaptureScreenshotAsTexture();
+                if (smokeViewport == null) yield return new WaitForEndOfFrame();
+                else yield return null;
+                Texture2D frame = smokeViewport == null
+                    ? ScreenCapture.CaptureScreenshotAsTexture()
+                    : smokeViewport.Capture();
                 if (frame == null) RecordError("Moving UI frame returned no texture at index " + index);
                 else
                 {
@@ -690,7 +1073,7 @@ namespace Riverworks
                 yield return new WaitForSecondsRealtime(.1f);
             }
             game.SetSpeed(0);
-            results.Add("CAPTURE 24 optional moving compact-HUD frames at " + Screen.width + "x" + Screen.height);
+            results.Add("CAPTURE 24 optional moving compact-HUD frames at " + FrameWidth + "x" + FrameHeight);
         }
 
         void Check(bool okay, string message)
