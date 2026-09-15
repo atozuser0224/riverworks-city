@@ -505,8 +505,8 @@ namespace Riverworks
             label.anchor = TextAnchor.LowerCenter;
             label.alignment = TextAlignment.Center;
             label.fontSize = 16;
-            label.characterSize = .085f;
-            label.color = new Color(.96f,.93f,.83f,1f);
+            label.characterSize = .07f;
+            label.color = new Color(.96f,.93f,.83f,.62f);
             Font font = GameFont.Load();
             label.font = font;
             if (font != null && font.material != null) label.GetComponent<MeshRenderer>().sharedMaterial = font.material;
@@ -519,7 +519,7 @@ namespace Riverworks
             labelShadow.fontSize = label.fontSize;
             labelShadow.characterSize = label.characterSize;
             labelShadow.font = font;
-            labelShadow.color = new Color(.04f, .07f, .07f, 1f);
+            labelShadow.color = new Color(.04f, .07f, .07f, .55f);
             if (font != null && font.material != null) labelShadow.GetComponent<MeshRenderer>().sharedMaterial = font.material;
             label.gameObject.SetActive(false);
         }
@@ -535,8 +535,14 @@ namespace Riverworks
                 label.text = next;
                 if (labelShadow != null) labelShadow.text = next;
             }
-            Color color = selected ? new Color(1f,.78f,.18f,1f) : new Color(.96f,.93f,.83f,1f);
+            Color color = selected ? new Color(1f,.78f,.18f,1f) : new Color(.96f,.93f,.83f,.62f);
             if (label.color != color) label.color = color;
+            float size = selected ? .082f : .07f;
+            if (!Mathf.Approximately(label.characterSize, size))
+            {
+                label.characterSize = size;
+                if (labelShadow != null) labelShadow.characterSize = size;
+            }
             if (camera != null) label.transform.rotation = camera.transform.rotation;
         }
 

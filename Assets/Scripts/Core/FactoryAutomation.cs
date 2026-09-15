@@ -245,16 +245,16 @@ namespace Riverworks
             return total > int.MaxValue ? -1 : (int)total;
         }
 
-        static bool ValidRuleShape(AutomationRule rule)
+        public static bool ValidRuleShape(AutomationRule rule)
         {
             return rule != null && rule.Id >= 0 && rule.SourceEntityId >= 0 && rule.TargetEntityId > 0 &&
                    ValidResource(rule.Resource) && Enum.IsDefined(typeof(AutomationComparison), rule.Comparison) &&
                    Enum.IsDefined(typeof(AutomationAction), rule.Action) && rule.Threshold >= 0 && rule.Threshold <= MaximumThreshold;
         }
 
-        static bool ValidResource(Resource resource) => ResourceCatalog.IsValid(resource) && resource != Resource.Coins;
+        public static bool ValidResource(Resource resource) => ResourceCatalog.IsValid(resource) && resource != Resource.Coins;
 
-        static bool IsControllable(FactoryEntity entity)
+        public static bool IsControllable(FactoryEntity entity)
         {
             if (entity == null || entity.Kind == FactoryKind.None || FactoryCatalog.Get(entity.Kind) == null) return false;
             return (entity.Kind != FactoryKind.ItemLift && entity.Kind != FactoryKind.FluidRiser) || entity.IsLinkSender;
@@ -276,7 +276,7 @@ namespace Riverworks
             return Finite(value) && value >= 1f;
         }
 
-        static bool ValidInventory(List<int> inventory) => inventory != null && inventory.Count == ResourceCatalog.InventoryCount && inventory[0] == 0 && inventory.All(value => value >= 0);
+        public static bool ValidInventory(List<int> inventory) => inventory != null && inventory.Count == ResourceCatalog.InventoryCount && inventory[0] == 0 && inventory.All(value => value >= 0);
         static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
         static AutomationRule Copy(AutomationRule source, int id) => new AutomationRule
         {

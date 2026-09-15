@@ -63,7 +63,7 @@ namespace Riverworks
             tiles=new MeshRenderer[441];
             for(int z=0;z<21;z++) for(int x=0;x<21;x++)
             {
-                var tile=Box(tilesRoot,$"Plot {x} {z}",new Vector3(1.035f,.20f,1.035f),Position(x,z)-Vector3.up*.12f,grass,true);
+                var tile=Box(tilesRoot,$"Plot {x} {z}",new Vector3(1.048f,.20f,1.048f),Position(x,z)-Vector3.up*.12f,grass,true);
                 tile.layer=8; var handle=tile.AddComponent<TileHandle>(); handle.X=x; handle.Z=z;
                 tiles[z*21+x]=tile.GetComponent<MeshRenderer>();
             }

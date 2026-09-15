@@ -11,10 +11,11 @@ static class Check
     {
         try
         {
-            NewGameAndCatalog(); TechnologyProgressionAndMigration(); ExpandedTechnologyPrerequisitesAndBenefits(); RiverIsCoherent(); InvalidMutationsAreAtomic(); CoinMirrorConsistency(); RoadConnectivity(); ProductionChainAndPower(); SteamPowerPreviewRequiresFuel(); HousingStarvationRecovery(); GhostPopulationIsCapped(); ComfortToolsAreOptional(); MarketStatus(); ExpansionRules(); UpgradeAndRefund(); StarterResourcePlots(); IndustrialObjectiveProgressMatchesRouteGates(); MilestonesAndEndlessWin(); NaturalProgressionFromNewGame(); passed += CitizenChecks.Run();
+            NewGameAndCatalog(); TechnologyProgressionAndMigration(); ExpandedTechnologyPrerequisitesAndBenefits(); RiverIsCoherent(); InvalidMutationsAreAtomic(); CoinMirrorConsistency(); RoadConnectivity(); ProductionChainAndPower(); SteamPowerPreviewRequiresFuel(); HousingStarvationRecovery(); GhostPopulationIsCapped(); ComfortToolsAreOptional(); MarketStatus(); ExpansionRules(); UpgradeAndRefund(); StarterResourcePlots(); IndustrialObjectiveProgressMatchesRouteGates(); MilestonesAndEndlessWin(); NaturalProgressionFromNewGame(); passed += CitizenChecks.Run(); passed += CitizenLifecycleChecks.Run();
             passed += CitizenDecisionChecks.Run();
             passed += TutorialChecks.Run();
             passed += FactoryChecks.Run();
+            passed += FactoryEcsChecks.Run();
             passed += BlueprintChecks.Run();
             passed += FactoryPropertyChecks.Run();
             passed += CityLogisticsChecks.Run();

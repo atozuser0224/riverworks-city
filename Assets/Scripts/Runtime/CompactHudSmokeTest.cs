@@ -116,7 +116,7 @@ namespace Riverworks
             results.Add("CAPTURE_MODE OFFSCREEN_RENDER_TARGET");
             results.Add("DEVICE_VALIDATION NOT_RUN - virtual renders do not prove a native window or Android layout");
 
-            int[,] resolutions = { { 1600, 900 }, { 1280, 720 }, { 1024, 768 }, { 2048, 1536 } };
+            int[,] resolutions = { { 1920, 1080 }, { 2560, 1440 }, { 1600, 900 }, { 1280, 720 }, { 1024, 768 }, { 2048, 1536 } };
             for (int resolution = 0; resolution < resolutions.GetLength(0); resolution++)
             {
                 int width = resolutions[resolution, 0];

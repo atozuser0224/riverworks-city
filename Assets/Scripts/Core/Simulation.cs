@@ -194,6 +194,7 @@ namespace Riverworks
         {
             Recalculate();
             State.Day++;
+            CitizenLifecycle.Advance(State, 1);
             State.ResearchPoints += ResearchPerDay;
             AdvanceResearch();
             CityProjects.Tick(State);
@@ -303,12 +304,14 @@ namespace Riverworks
                 + CityProjects.PreviewPower(State);
             int housingCapacity = State.Cells.Where(c => c.Building == BuildingKind.House).Sum(c => c.Level * 6);
             State.Population = Math.Min(State.Population, housingCapacity);
+            CitizenLifecycle.Reconcile(State);
             SyncCoins();
             UpdateObjective();
         }
 
         private void ProcessHomes()
         {
+            CitizenLifecycle.Reconcile(State);
             var homes = State.Cells.Where(c => c.Connected && c.Building == BuildingKind.House).ToList();
             int capacity = homes.Sum(c => c.Level * 6);
             float needed = Math.Max(.15f, State.Population * .055f);
@@ -329,13 +332,17 @@ namespace Riverworks
                 foreach (Cell home in homes) { home.Progress += (grainFallback ? .12f : .22f) * home.Level; home.Status = grainFallback ? "곡물 식사 · 더 나은 음식이 필요합니다." : "주민 만족 · 성장 중"; }
                 float growth = homes.Sum(h => h.Progress >= 1 ? 1 : 0);
                 foreach (Cell home in homes.Where(h => h.Progress >= 1)) home.Progress -= 1;
-                State.Population = Math.Min(capacity, State.Population + (int)growth);
+                int room = Math.Max(0, capacity - CitizenLifecycle.Count(State));
+                int births = Math.Min((int)growth, room);
+                for (int i = 0; i < births; i++) CitizenLifecycle.RecordBirth(State);
+                if (births > 0) CitizenLifecycle.SyncPopulation(State);
             }
             else
             {
                 State.Happiness = Math.Max(0, State.Happiness - (homes.Count == 0 ? 2 : 4));
                 foreach (Cell home in homes) home.Status = "식량 부족 · 성장이 멈췄습니다.";
-                if (State.Happiness < 25 && State.Population > 1) State.Population--;
+                if (State.Happiness < 25 && CitizenLifecycle.Count(State) > 1 &&
+                    CitizenLifecycle.RemoveOne(State)) CitizenLifecycle.SyncPopulation(State);
             }
         }
 
@@ -440,6 +447,7 @@ namespace Riverworks
             if (State.Cells == null || State.Cells.Count != State.Size * State.Size) throw new ArgumentException("맵 셀 수가 올바르지 않습니다.");
             State.OwnedRegions ??= new List<int>();
             SyncCoins();
+            CitizenLifecycle.Reconcile(State);
         }
         private bool NearTerrain(int x, int z, TerrainKind terrain) => GetCell(x, z)?.Terrain == terrain || Adjacent(x, z).Any(c => c.Terrain == terrain);
         private float TechnologyOutputMultiplier(BuildingKind kind)

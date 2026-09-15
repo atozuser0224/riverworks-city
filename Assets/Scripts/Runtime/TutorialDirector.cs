@@ -12,7 +12,9 @@ namespace Riverworks
     public sealed class TutorialDirector : MonoBehaviour
     {
         const string ExplicitSmokeArgument = "-riverworks-tutorial-smoke";
-        public const float MinimumLessonIntervalSeconds = 10f;
+        public const float MinimumLessonIntervalSeconds = 75f;
+        /// <summary>Automatic tips wait until the player has been inactive this long.</summary>
+        public const float AutoLessonIdleSeconds = 6f;
         static readonly string[] NoPages = Array.Empty<string>();
 
         GameController game;
@@ -38,6 +40,7 @@ namespace Riverworks
         bool ownsLessonPause;
         float lessonResumeSpeed = 1f;
         float observedSpeed = 1f;
+        float lastPlayerActivityAt;
         bool publishedGoalSatisfied;
         LineRenderer targetOutline;
         Material targetMaterial;
@@ -122,8 +125,18 @@ namespace Riverworks
         {
             UpdateGuideFollowForTask();
             if (game == null || observedState == null || IntroPlaying || lessonMode || adviceMode) return;
+            if (PlayerIsActive()) lastPlayerActivityAt = Time.unscaledTime;
             if (Time.unscaledTime < nextLessonEligibleAt || !CanPresentAutomatically || !IsIdleForGuidance()) return;
+            // Automatic tips also rest while the player keeps building, so guidance never interrupts play.
+            if (Time.unscaledTime - lastPlayerActivityAt < AutoLessonIdleSeconds) return;
             TryOpenNextLesson(false);
+        }
+
+        static bool PlayerIsActive()
+        {
+            if (Input.anyKeyDown) return true;
+            if (Input.GetMouseButton(0) || Input.GetMouseButton(1) || Input.GetMouseButton(2)) return true;
+            return Mathf.Abs(Input.mouseScrollDelta.y) > .01f;
         }
 
         /// <summary>Called only after the dialogue UI has revealed the complete current line.</summary>

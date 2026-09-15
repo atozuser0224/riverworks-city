@@ -10,11 +10,13 @@ namespace Riverworks
         static readonly int[] Dx = { 1, 0, -1, 0 }, Dz = { 0, 1, 0, -1 };
         readonly List<FactoryEntity> processingOrder = new List<FactoryEntity>();
         readonly List<FactoryEntity> reverseTransportOrder = new List<FactoryEntity>();
-        readonly List<FactoryEntity> powerNodes = new List<FactoryEntity>();
-        readonly HashSet<int> livePowerNodes = new HashSet<int>();
         readonly HashSet<int> cargoAtTickStart = new HashSet<int>();
         readonly IFactoryEnvironment environment;
         readonly FactoryFluidSimulation fluidSimulation;
+        FactoryPowerBridge powerBridge;
+        FactoryMachineBridge machineBridge;
+        FactoryAutomationBridge automationBridge;
+        FactoryTransportBridge transportBridge;
         GameState technologyState;
         long cachedStructureHash = long.MinValue, cachedPowerHash = long.MinValue;
         bool hasStructureCache, hasPowerCache;
@@ -231,15 +233,23 @@ namespace Riverworks
         public void Tick(float seconds)
         {
             if (seconds <= 0 || !Finite(seconds)) return;
-            FactoryAutomation.Evaluate(State, technologyState);
+            automationBridge ??= new FactoryAutomationBridge();
+            automationBridge.Import(State, technologyState);
+            automationBridge.Run();
+            automationBridge.Export(State);
             Recalculate(); State.ElapsedSeconds += seconds;
             cargoAtTickStart.Clear();
             foreach (FactoryEntity e in processingOrder) if (ResourceCatalog.IsTransportable(e.CargoResource)) cargoAtTickStart.Add(e.Id);
-            foreach (FactoryEntity e in processingOrder) ProcessMachine(e, seconds);
-            foreach (FactoryEntity e in processingOrder) if (e.Kind == FactoryKind.Inserter && e.Powered && !e.IsStopped) ProcessInserter(e, seconds * InserterSpeedMultiplier, cargoAtTickStart.Contains(e.Id));
-            foreach (FactoryEntity e in reverseTransportOrder) if (cargoAtTickStart.Contains(e.Id) && !e.IsStopped) ProcessBelt(e, seconds * BeltSpeedMultiplier);
-            foreach (FactoryEntity e in processingOrder) if (e.Kind == FactoryKind.Drill && e.Powered && !e.IsStopped) EmitExtraction(e);
-            ProcessItemLifts(seconds);
+            machineBridge ??= new FactoryMachineBridge();
+            machineBridge.Import(processingOrder, State, this, MachineSpeedMultiplier);
+            machineBridge.Seconds = seconds;
+            machineBridge.Run();
+            machineBridge.Export();
+            transportBridge ??= new FactoryTransportBridge();
+            transportBridge.Import(processingOrder, State, environment, cargoAtTickStart, BeltSpeedMultiplier, InserterSpeedMultiplier);
+            transportBridge.Seconds = seconds;
+            transportBridge.Run();
+            transportBridge.Export();
             fluidSimulation.Tick(seconds);
             foreach (FactoryEntity e in processingOrder)
             {
@@ -264,28 +274,7 @@ namespace Riverworks
         public static bool HasOre(int x, int z) => x >= 1 && x <= 4 && z >= 6 && z <= 10;
         public static void ValidateState(FactoryState state) => FactoryStateValidation.Validate(state);
 
-        void ProcessMachine(FactoryEntity e, float seconds)
-        {
-            if (!e.Powered || e.IsStopped || !FactoryCatalog.IsProduction(e.Kind)) return;
-            FactoryRecipe effective = EffectiveRecipe(e); RecipeSpec recipe = FactoryCatalog.GetRecipe(effective);
-            if (recipe == null) { e.Status = "제조법을 선택하세요."; return; }
-            if (!CanUseRecipe(effective, out string gate)) { e.Status = gate; return; }
-            if (recipe.IsExtraction && !SourceAvailable(e, recipe.SourceResource)) { e.Status = "필요한 자원 지형이 없습니다."; return; }
-            if (!HasInputs(e, recipe)) { e.Status = "제조법 원료 부족"; return; }
-            if (!HasOutputSpace(e, recipe)) { e.Status = "출력 또는 부산물 공간 부족"; return; }
-            e.Progress += seconds * MachineSpeedMultiplier * e.ClockPercent / 100f;
-            e.Status = recipe.IsExtraction ? "자원 추출 중" : "가공 중";
-            int batches = MaximumPossibleBatches(e, recipe);
-            while (batches-- > 0)
-            {
-                e.Progress -= recipe.Duration;
-                foreach (RecipeAmount input in recipe.Inputs) e.Input[(int)input.Resource] -= input.Amount;
-                foreach (RecipeAmount output in recipe.Outputs) { e.Output[(int)output.Resource] += output.Amount; State.Produced[(int)output.Resource] += output.Amount; }
-                e.Status = "생산 완료";
-            }
-            // Buffer capacity bounds the number of useful completions even for an extreme delta.
-            if (e.Progress >= recipe.Duration) e.Progress = Math.Max(0, recipe.Duration - .000001f);
-        }
+        public bool IsExtractionSourceAvailable(FactoryEntity e, Resource source) => SourceAvailable(e, source);
 
         void EmitExtraction(FactoryEntity e)
         {
@@ -583,42 +572,15 @@ namespace Riverworks
         }
         void RecalculatePowerGraph(long hash)
         {
-            powerNodes.Clear(); livePowerNodes.Clear();
-            foreach (FactoryEntity e in processingOrder)
-            {
-                if (e.Kind != FactoryKind.PowerInlet && e.Kind != FactoryKind.Pole) continue;
-                powerNodes.Add(e); if (!e.IsStopped && e.Kind == FactoryKind.PowerInlet && e.Floor == 0 && (environment == null || environment.CanSupplyPower(e))) livePowerNodes.Add(e.Id);
-            }
-            bool changed;
-            do
-            {
-                changed = false;
-                foreach (FactoryEntity node in powerNodes)
-                {
-                    if (node.IsStopped || livePowerNodes.Contains(node.Id)) continue;
-                    foreach (FactoryEntity source in powerNodes)
-                        if (!source.IsStopped && livePowerNodes.Contains(source.Id) && GridDistance(node, source) <= 6) { livePowerNodes.Add(node.Id); changed = true; break; }
-                }
-            } while (changed);
-            foreach (FactoryEntity node in powerNodes) { node.Powered = livePowerNodes.Contains(node.Id); node.Status = node.Paused ? "수동 일시정지" : node.AutomationBlocked ? "자동화 조건 대기" : node.Powered ? "전력망 연결" : "전력 인입구 연결 필요"; }
-            PowerAvailable = livePowerNodes.Count > 0 ? Math.Max(0, State.PowerBudget) : 0; PowerUsed = 0;
-            foreach (FactoryEntity e in processingOrder)
-            {
-                float demand = Demand(e);
-                if (demand <= 0) { if (e.Kind != FactoryKind.PowerInlet && e.Kind != FactoryKind.Pole) e.Powered = !e.IsStopped; continue; }
-                bool covered = powerNodes.Any(n => livePowerNodes.Contains(n.Id) && GridDistance(e, n) <= 4);
-                e.Powered = !e.IsStopped && covered && PowerUsed + demand <= PowerAvailable + .0001f;
-                if (e.Powered) PowerUsed += demand; else e.Status = e.Paused ? "수동 일시정지" : e.AutomationBlocked ? "자동화 조건 대기" : covered ? "공장 전력 예산 부족" : "전력망 범위 밖";
-            }
+            powerBridge ??= new FactoryPowerBridge();
+            powerBridge.Import(processingOrder, State.PowerBudget, PowerDemandMultiplier, environment);
+            powerBridge.Run();
+            powerBridge.Export();
+            PowerAvailable = powerBridge.PowerAvailable;
+            PowerUsed = powerBridge.PowerUsed;
             cachedPowerHash = hash; hasPowerCache = true;
         }
         static long Mix(long hash, int value) => unchecked((hash ^ (uint)value) * 1099511628211L);
-        float Demand(FactoryEntity e)
-        {
-            if (e.IsStopped) return 0;
-            float clock = FactoryCatalog.IsClockable(e.Kind) ? e.ClockPercent / 100f : 1f;
-            return (FactoryCatalog.Get(e.Kind)?.PowerDemand ?? 0) * PowerDemandMultiplier * clock * clock;
-        }
         FactoryEntity Find(int id) => State.Entities.FirstOrDefault(e => e.Id == id);
         static void ClearCargo(FactoryEntity e) { e.CargoResource = Resource.Coins; e.CargoProgress = 0; }
         static bool Finite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);

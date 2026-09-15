@@ -13,11 +13,11 @@ MonoBehaviour:
   m_Name: ResidentVisualLibrary
   m_EditorClassIdentifier: Assembly-CSharp::Riverworks.ResidentVisualLibrary
   Models:
-  - {fileID: 3235075699135994975, guid: 9af8441d59ad17b48a0663e18e13089a, type: 3}
-  - {fileID: 8773978570066890263, guid: 07a20a90cff96a948ac38d9397ca2e6c, type: 3}
-  - {fileID: 4943560870169718714, guid: 9d728c3085ec3f043adea20019dd8d4c, type: 3}
-  - {fileID: 7755089728928912407, guid: 143149e61b9697044a45f8a904f13e96, type: 3}
-  GuideModel: {fileID: 5664319818001771914, guid: bcf88ff2e72cc1b4db00fec50f0f0907, type: 3}
+  - {fileID: 7899835261092809628, guid: 9af8441d59ad17b48a0663e18e13089a, type: 3}
+  - {fileID: 93123914492204142, guid: 07a20a90cff96a948ac38d9397ca2e6c, type: 3}
+  - {fileID: 8258723570680875645, guid: 9d728c3085ec3f043adea20019dd8d4c, type: 3}
+  - {fileID: 3382786705576649319, guid: 143149e61b9697044a45f8a904f13e96, type: 3}
+  GuideModel: {fileID: 3815068573143533954, guid: bcf88ff2e72cc1b4db00fec50f0f0907, type: 3}
   Idle: {fileID: 7994627924475153551, guid: 5b6f688315e93c14bb61ba8e0ef363e1, type: 3}
   Walk: {fileID: -7003542030617561338, guid: 5b6f688315e93c14bb61ba8e0ef363e1, type: 3}
   Carry: {fileID: 4786625530542965921, guid: 727abb587bf7ef74992f536e7a98a610, type: 3}

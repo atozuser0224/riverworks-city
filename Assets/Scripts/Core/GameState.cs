@@ -87,6 +87,7 @@ namespace Riverworks
         public FactoryState ArchivedFactory;
         public TutorialProgress Tutorial;
         public List<CityProjectState> CityProjects = new List<CityProjectState>();
+        public CitizenLifecycleState Citizens = new CitizenLifecycleState();
 
         public static GameState CreateNew()
         {

@@ -14,6 +14,11 @@ namespace Riverworks
 
         readonly FactoryState state;
         readonly List<FactoryEntity> ordered = new List<FactoryEntity>();
+        readonly List<FactoryEntity> fluidEntities = new List<FactoryEntity>();
+        readonly Snapshot snapshot = new Snapshot();
+        readonly Dictionary<int, int[]> quantityPool = new Dictionary<int, int[]>();
+        readonly Dictionary<int, int> reservedTotal = new Dictionary<int, int>();
+        readonly Dictionary<long, int> reservedResource = new Dictionary<long, int>();
         readonly Dictionary<long, FactoryEntity> cells = new Dictionary<long, FactoryEntity>();
         readonly Dictionary<long, FactoryEntity> machineInputs = new Dictionary<long, FactoryEntity>();
         readonly Dictionary<int, FactoryEntity> byId = new Dictionary<int, FactoryEntity>();
@@ -44,17 +49,17 @@ namespace Riverworks
         {
             if (!(seconds > 0f) || float.IsNaN(seconds) || float.IsInfinity(seconds)) return;
             EnsureTopology();
-            foreach (FactoryEntity entity in ordered)
+            foreach (FactoryEntity entity in fluidEntities)
             {
                 entity.FluidProgress = ClampCredit(entity.FluidProgress);
                 entity.FluidCursor = Mod(entity.FluidCursor, 4);
             }
-            Snapshot snapshot = TakeSnapshot();
-            var reservedTotal = new Dictionary<int, int>();
-            var reservedResource = new Dictionary<long, int>();
+            TakeSnapshot();
+            reservedTotal.Clear();
+            reservedResource.Clear();
             typedRejections.Clear();
 
-            foreach (FactoryEntity source in ordered)
+            foreach (FactoryEntity source in fluidEntities)
             {
                 if (source.IsStopped || (source.Kind == FactoryKind.FluidRiser && !source.Powered)) continue;
                 List<Resource> resources = SourceResources(source, snapshot);
@@ -129,10 +134,16 @@ namespace Riverworks
 
         Snapshot TakeSnapshot()
         {
-            var snapshot = new Snapshot();
-            foreach (FactoryEntity entity in ordered)
+            snapshot.Quantities.Clear();
+            snapshot.Totals.Clear();
+            foreach (FactoryEntity entity in fluidEntities)
             {
-                int[] quantities = new int[ResourceCatalog.InventoryCount];
+                if (!quantityPool.TryGetValue(entity.Id, out int[] quantities))
+                {
+                    quantities = new int[ResourceCatalog.InventoryCount];
+                    quantityPool[entity.Id] = quantities;
+                }
+                else Array.Clear(quantities, 0, quantities.Length);
                 List<int> inventory = SourceInventory(entity);
                 if (inventory != null)
                     for (int i = 31; i < Math.Min(quantities.Length, inventory.Count); i++) quantities[i] = inventory[i];
@@ -321,6 +332,11 @@ namespace Riverworks
                         if (port.IsInput && !machineInputs.ContainsKey(PortKey(port.X, port.Z, port.Floor, port.Resource)))
                             machineInputs[PortKey(port.X, port.Z, port.Floor, port.Resource)] = entity;
             }
+            // Only fluid transport and production entities can be sources or destinations, so the
+            // per-tick snapshot and movement pass stay off the belt/inserter population entirely.
+            fluidEntities.Clear();
+            foreach (FactoryEntity entity in ordered)
+                if (FactoryCatalog.IsFluidTransport(entity.Kind) || FactoryCatalog.IsProduction(entity.Kind)) fluidEntities.Add(entity);
             cachedTopology = hash;
         }
 

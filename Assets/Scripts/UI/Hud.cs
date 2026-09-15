@@ -54,6 +54,7 @@ namespace Riverworks
         GameObject factoryRecipeSection, factoryFilterSection, factoryFeedSection, factoryFloorStrip;
         CanvasGroup noticeGroup;
         RectTransform buildViewport, buildScrollViewport, buildChoicesRect, buildTooltipRect, activeToolRect, activeToolContent, inspectorRowsRoot;
+        RectTransform topResourceViewportRect, topStatusRect, topStatusDividerRect, objectiveFillRect, objectiveChipFillRect, bottomViewportRect;
         readonly List<Text> inspectorRowLabels = new List<Text>();
         readonly List<Text> inspectorRowValues = new List<Text>();
         readonly Dictionary<Resource, GameObject> resourceChips = new Dictionary<Resource, GameObject>();
@@ -296,34 +297,50 @@ namespace Riverworks
         void BuildTopBar()
         {
             GameObject top = Panel("TopBar", transform, new Color(Navy.r,Navy.g,Navy.b,.98f), new Vector2(0, 1), new Vector2(1, 1), new Vector2(0, -52), Vector2.zero);
+
+            // Group A: resources are text-first so the numbers read before their labels.
             GameObject resourceViewport=new GameObject("ResourceViewport",typeof(RectTransform),typeof(RectMask2D),typeof(ScrollRect));
             resourceViewport.transform.SetParent(top.transform,false);
             Rect(resourceViewport,new Vector2(0,0),new Vector2(1,1),new Vector2(8,4),new Vector2(-216,-4));
+            topResourceViewportRect=resourceViewport.GetComponent<RectTransform>();
             GameObject resourceContent=new GameObject("ResourceContent",typeof(RectTransform),typeof(HorizontalLayoutGroup),typeof(ContentSizeFitter));
             resourceContent.transform.SetParent(resourceViewport.transform,false);
             RectTransform resourceContentRect=resourceContent.GetComponent<RectTransform>();
             resourceContentRect.anchorMin=new Vector2(0,0);resourceContentRect.anchorMax=new Vector2(0,1);resourceContentRect.pivot=new Vector2(0,.5f);resourceContentRect.anchoredPosition=Vector2.zero;resourceContentRect.sizeDelta=Vector2.zero;
-            HorizontalLayoutGroup resourceLayout=resourceContent.GetComponent<HorizontalLayoutGroup>();resourceLayout.spacing=4;resourceLayout.childForceExpandWidth=false;resourceLayout.childForceExpandHeight=true;
+            HorizontalLayoutGroup resourceLayout=resourceContent.GetComponent<HorizontalLayoutGroup>();resourceLayout.spacing=10;resourceLayout.childForceExpandWidth=false;resourceLayout.childForceExpandHeight=true;resourceLayout.childAlignment=TextAnchor.MiddleLeft;
             ContentSizeFitter resourceFitter=resourceContent.GetComponent<ContentSizeFitter>();resourceFitter.horizontalFit=ContentSizeFitter.FitMode.PreferredSize;
             ScrollRect resourceScroll=resourceViewport.GetComponent<ScrollRect>();resourceScroll.viewport=resourceViewport.GetComponent<RectTransform>();resourceScroll.content=resourceContentRect;resourceScroll.horizontal=true;resourceScroll.vertical=false;resourceScroll.movementType=ScrollRect.MovementType.Clamped;
             Resource[] shown = { Resource.Coins, Resource.Timber, Resource.Stone, Resource.Grain, Resource.Flour, Resource.Bread, Resource.Ore, Resource.Steel, Resource.Tools };
             foreach (Resource res in shown)
             {
-                float width=res==Resource.Coins?82:68;
-                GameObject chip = Box(res.ToString(), resourceContent.transform, Vector2.zero, new Vector2(width,42), new Color(Navy2.r,Navy2.g,Navy2.b,.86f),Vector2.zero);
+                float width=res==Resource.Coins?94:74;
+                GameObject chip = Box(res.ToString(), resourceContent.transform, Vector2.zero, new Vector2(width,42), new Color(Navy2.r,Navy2.g,Navy2.b,0f),Vector2.zero);
                 LayoutElement chipLayout=chip.AddComponent<LayoutElement>();chipLayout.preferredWidth=width;chipLayout.preferredHeight=42;
                 Text t = Label("", chip.transform, HudStyle.BodySize, Cream, FontStyle.Normal, TextAnchor.MiddleCenter);
-                Rect(t.gameObject, Vector2.zero, Vector2.one, new Vector2(3, 2), new Vector2(-3, -2));
+                Rect(t.gameObject, Vector2.zero, Vector2.one, new Vector2(2, 2), new Vector2(-2, -2));
+                t.horizontalOverflow=HorizontalWrapMode.Overflow;
                 resourceTexts[res] = t;
                 resourceChips[res] = chip;
                 FeelUiFeedback.AttachResource(t,res==Resource.Coins?Gold:Teal);
+                if (res != shown[shown.Length - 1]) AddResourceSeparator(chip, 5f);
             }
-            GameObject populationChip=Box("Population",resourceContent.transform,Vector2.zero,new Vector2(232,42),new Color(Navy2.r,Navy2.g,Navy2.b,.86f),Vector2.zero);
-            LayoutElement populationLayout=populationChip.AddComponent<LayoutElement>();populationLayout.preferredWidth=232;populationLayout.preferredHeight=42;
+
+            // Group B: village status is fixed, never scrolls with the resource row.
+            GameObject populationChip=Box("Population",top.transform,new Vector2(-216,4),new Vector2(224,42),new Color(Navy2.r,Navy2.g,Navy2.b,.92f),new Vector2(1,1));
+            topStatusRect=populationChip.GetComponent<RectTransform>();
             populationText = Label("", populationChip.transform, HudStyle.BodySize, Cream, FontStyle.Normal, TextAnchor.MiddleCenter);
-            Rect(populationText.gameObject,Vector2.zero,new Vector2(.58f,1),new Vector2(4,1),new Vector2(-2,-1));
+            Rect(populationText.gameObject,Vector2.zero,new Vector2(.62f,1),new Vector2(8,1),new Vector2(-2,-1));
             incomeText=Label("",populationChip.transform,HudStyle.BodySize,Cream,FontStyle.Normal,TextAnchor.MiddleCenter);
-            Rect(incomeText.gameObject,new Vector2(.58f,0),Vector2.one,new Vector2(2,1),new Vector2(-4,-1));
+            Rect(incomeText.gameObject,new Vector2(.62f,0),Vector2.one,new Vector2(2,1),new Vector2(-8,-1));
+
+            GameObject statusDivider = new GameObject("TopStatusDivider",typeof(RectTransform),typeof(Image));
+            statusDivider.transform.SetParent(top.transform,false);
+            RectTransform dividerRect=statusDivider.GetComponent<RectTransform>();
+            dividerRect.anchorMin=dividerRect.anchorMax=dividerRect.pivot=new Vector2(1,1);
+            dividerRect.anchoredPosition=new Vector2(-444,4);dividerRect.sizeDelta=new Vector2(6,44);
+            Image dividerImage=statusDivider.GetComponent<Image>();
+            dividerImage.sprite=HudAssets.Divider;dividerImage.color=HudStyle.TextMuted;dividerImage.preserveAspect=true;dividerImage.raycastTarget=false;
+            topStatusDividerRect=dividerRect;
 
             Button research = MakeButton("기술 연구", top.transform, new Vector2(-8,-4), new Vector2(200,HudStyle.TouchSize), Navy2, () => controller.ToggleResearch(), new Vector2(1,1), HudStyle.BodySize);
             research.name="Button_기술 연구";
@@ -343,13 +360,30 @@ namespace Riverworks
             Rect(objectiveChipText.gameObject,Vector2.zero,Vector2.one,new Vector2(12,2),new Vector2(-26,-2));
             LabelAt("›",chip.transform,HudStyle.TitleSize,Muted,FontStyle.Normal,new Vector2(224,-10),new Vector2(18,24)).alignment=TextAnchor.MiddleCenter;
 
+            // A hairline progress underline keeps the collapsed objective glanceable without a second card.
+            GameObject chipTrack=new GameObject("ObjectiveChipTrack",typeof(RectTransform),typeof(Image));chipTrack.transform.SetParent(chip.transform,false);
+            Rect(chipTrack,new Vector2(0,0),new Vector2(1,0),new Vector2(10,2),new Vector2(-28,5));
+            Image chipTrackImage=chipTrack.GetComponent<Image>();chipTrackImage.color=new Color(Navy2.r,Navy2.g,Navy2.b,.9f);chipTrackImage.raycastTarget=false;
+            GameObject chipFill=new GameObject("ObjectiveChipFill",typeof(RectTransform),typeof(Image));chipFill.transform.SetParent(chipTrack.transform,false);
+            RectTransform chipFillRect=chipFill.GetComponent<RectTransform>();
+            chipFillRect.anchorMin=new Vector2(0,0);chipFillRect.anchorMax=new Vector2(0,1);chipFillRect.pivot=new Vector2(0,.5f);chipFillRect.anchoredPosition=Vector2.zero;chipFillRect.sizeDelta=Vector2.zero;
+            Image chipFillImage=chipFill.GetComponent<Image>();chipFillImage.color=Teal;chipFillImage.raycastTarget=false;
+            objectiveChipFillRect=chipFillRect;
+
             objectivePanel = Box("Objectives", transform, new Vector2(8, -110), new Vector2(276, 160), new Color(Paper.r,Paper.g,Paper.b,.98f), new Vector2(0,1));
             Button close=MakeButton("",objectivePanel.transform,new Vector2(-8,-4),new Vector2(44,44),Navy,()=>SetObjectives(false),new Vector2(1,1),11);
             close.name="Button_ObjectivesClose";
             AddCenteredModalIcon(close,HudAssets.CloseIcon);
             objectiveTitle = LabelAt("", objectivePanel.transform, HudStyle.TitleSize, Cream, FontStyle.Normal, new Vector2(14,-10), new Vector2(190,30));
             objectiveBody = LabelAt("", objectivePanel.transform, HudStyle.BodySize, Ink, FontStyle.Normal, new Vector2(14,-48), new Vector2(248,58));
-            objectiveProgress = LabelAt("", objectivePanel.transform, HudStyle.BodySize, Teal, FontStyle.Normal, new Vector2(14,-116), new Vector2(248,22));
+            objectiveProgress = LabelAt("", objectivePanel.transform, HudStyle.BodySize, Teal, FontStyle.Normal, new Vector2(14,-110), new Vector2(248,22));
+            GameObject objectiveBar=Box("ObjectiveProgressBar",objectivePanel.transform,new Vector2(14,-138),new Vector2(248,10),new Color(Navy.r,Navy.g,Navy.b,.9f),new Vector2(0,1));
+            GameObject objectiveFill=new GameObject("ObjectiveProgressFill",typeof(RectTransform),typeof(Image));
+            objectiveFill.transform.SetParent(objectiveBar.transform,false);
+            RectTransform fillRect=objectiveFill.GetComponent<RectTransform>();
+            fillRect.anchorMin=new Vector2(0,0);fillRect.anchorMax=new Vector2(0,1);fillRect.pivot=new Vector2(0,.5f);fillRect.anchoredPosition=Vector2.zero;fillRect.sizeDelta=Vector2.zero;
+            Image fillImage=objectiveFill.GetComponent<Image>();fillImage.color=Teal;fillImage.raycastTarget=false;
+            objectiveFillRect=fillRect;
             FeelUiFeedback.AttachPanel(objectivePanel);
             objectivePanel.SetActive(false);
         }
@@ -384,7 +418,8 @@ namespace Riverworks
         {
             GameObject bottom = Panel("BuildBar", transform, new Color(Navy.r,Navy.g,Navy.b,.98f), new Vector2(0,0), new Vector2(1,0), new Vector2(8,8), new Vector2(-8,60));
             GameObject groupViewport=new GameObject("BottomGroupsViewport",typeof(RectTransform),typeof(RectMask2D),typeof(ScrollRect));groupViewport.transform.SetParent(bottom.transform,false);
-            Rect(groupViewport,Vector2.zero,Vector2.one,new Vector2(6,4),new Vector2(-88,-4));
+            Rect(groupViewport,Vector2.zero,Vector2.one,new Vector2(6,4),new Vector2(-264,-4));
+            bottomViewportRect=groupViewport.GetComponent<RectTransform>();
             GameObject groups=new GameObject("BottomGroups",typeof(RectTransform),typeof(HorizontalLayoutGroup),typeof(ContentSizeFitter));groups.transform.SetParent(groupViewport.transform,false);
             RectTransform groupsRect=groups.GetComponent<RectTransform>();groupsRect.anchorMin=new Vector2(0,0);groupsRect.anchorMax=new Vector2(0,1);groupsRect.pivot=new Vector2(0,.5f);groupsRect.anchoredPosition=Vector2.zero;groupsRect.sizeDelta=Vector2.zero;
             HorizontalLayoutGroup groupsLayout=groups.GetComponent<HorizontalLayoutGroup>();groupsLayout.spacing=4;groupsLayout.childForceExpandWidth=false;groupsLayout.childForceExpandHeight=true;
@@ -406,13 +441,22 @@ namespace Riverworks
             Button menu=MakeButton("메뉴",bottom.transform,new Vector2(-6,-4),new Vector2(76,44),Navy2,OpenMenu,new Vector2(1,1),12);
             menu.name="Button_Menu";AddButtonIcon(menu,"menu");
 
-            AddDivider(groups.transform);
-            float[] speeds={0,1,3}; string[] names={"Ⅱ","1×","3×"};
+            // Group B: time control is an independent fixed group, not part of the scrolling build row.
+            GameObject speedGroup=new GameObject("TimeControlGroup",typeof(RectTransform),typeof(HorizontalLayoutGroup));speedGroup.transform.SetParent(bottom.transform,false);
+            RectTransform speedRect=speedGroup.GetComponent<RectTransform>();
+            speedRect.anchorMin=speedRect.anchorMax=speedRect.pivot=new Vector2(1,1);
+            speedRect.anchoredPosition=new Vector2(-88,4);speedRect.sizeDelta=new Vector2(160,44);
+            HorizontalLayoutGroup speedLayout=speedGroup.GetComponent<HorizontalLayoutGroup>();
+            speedLayout.spacing=4;speedLayout.padding=new RectOffset(3,3,0,0);speedLayout.childForceExpandWidth=false;speedLayout.childForceExpandHeight=true;speedLayout.childAlignment=TextAnchor.MiddleRight;
+            AddDivider(speedGroup.transform);
+            float[] speeds={0,1,3}; string[] names={"Ⅱ","1×","3×"}; string[] speedTips={"일시 정지","보통 속도","빠르게"};
             for(int i=0;i<3;i++)
             {
-                float speed=speeds[i];Button b=MakeLayoutButton(names[i],groups.transform,44,Navy2,()=>controller.SetSpeed(speed));
+                float speed=speeds[i];Button b=MakeLayoutButton(names[i],speedGroup.transform,44,Navy2,()=>controller.SetSpeed(speed));
                 b.name="Button_"+names[i];speedButtons.Add(b);ConfigureSpeedButton(b,i);
+                HudTooltipTrigger tip=b.gameObject.AddComponent<HudTooltipTrigger>();tip.TooltipText=speedTips[i];tip.Show=ShowBuildTooltip;tip.Hide=HideBuildTooltip;
             }
+
             AddDivider(groups.transform);
             Button overview=MakeLayoutButton("현황",groups.transform,52,Navy2,()=>OpenUtility("overview"));overview.name="Button_Overview";
             Button territory=MakeLayoutButton("영토",groups.transform,52,Navy2,()=>OpenUtility("territory"));territory.name="Button_Territory";
@@ -495,6 +539,27 @@ namespace Riverworks
             Image image=divider.GetComponent<Image>();image.sprite=HudAssets.Divider;image.color=HudStyle.TextMuted;image.preserveAspect=true;image.raycastTarget=false;
         }
 
+        static void AddResourceSeparator(GameObject chip, float offset)
+        {
+            // A hairline separator sits in the layout gap and disappears with its hidden resource chip.
+            GameObject separator=new GameObject("ResourceSeparator",typeof(RectTransform),typeof(Image));separator.transform.SetParent(chip.transform,false);
+            RectTransform rect=separator.GetComponent<RectTransform>();
+            rect.anchorMin=rect.anchorMax=new Vector2(1,.5f);rect.pivot=new Vector2(.5f,.5f);
+            rect.anchoredPosition=new Vector2(offset,0);rect.sizeDelta=new Vector2(1,22);
+            Image image=separator.GetComponent<Image>();
+            image.color=new Color(HudStyle.TextMuted.r,HudStyle.TextMuted.g,HudStyle.TextMuted.b,.35f);
+            image.raycastTarget=false;
+        }
+
+        void FitResourceChip(Resource resource, Text text)
+        {
+            // Resource chips stay on one line: the chip grows to the rendered label+value width.
+            if(text==null||!resourceChips.TryGetValue(resource,out GameObject chip)||chip==null)return;
+            LayoutElement layout=chip.GetComponent<LayoutElement>();if(layout==null)return;
+            float fit=Mathf.Max(58f,text.preferredWidth+10f);
+            if(Mathf.Abs(layout.preferredWidth-fit)>.5f)layout.preferredWidth=fit;
+        }
+
         void ConfigureSpeedButton(Button button,int index)
         {
             Text label=button.GetComponentInChildren<Text>();if(label!=null)label.gameObject.SetActive(false);
@@ -575,14 +640,39 @@ namespace Riverworks
 
         void ResizeConstructionPanels()
         {
-            if(buildChoicesRect==null)return;
             float logicalWidth=Mathf.Max(1,currentSafePixels.width/Mathf.Max(1,appliedUiScale));
+            ResizeTopBar(logicalWidth);
+            ResizeBottomBar(logicalWidth);
+            if(buildChoicesRect==null)return;
             float contentWidth=20;
             foreach(var pair in buildButtons)if(pair.Value!=null&&pair.Value.gameObject.activeSelf)contentWidth+=102;
             foreach(var pair in factoryButtons)if(pair.Value!=null&&pair.Value.gameObject.activeSelf)contentWidth+=110;
             buildChoicesRect.sizeDelta=new Vector2(Mathf.Clamp(contentWidth,116,Mathf.Max(116,logicalWidth-16)),72);
             if(activeToolRect!=null)activeToolRect.sizeDelta=new Vector2(Mathf.Clamp(logicalWidth-16,116,460),52);
             if(buildTooltipRect!=null)buildTooltipRect.sizeDelta=new Vector2(Mathf.Min(420,Mathf.Max(220,logicalWidth-16)),58);
+        }
+
+        void ResizeTopBar(float logicalWidth)
+        {
+            if(topStatusRect==null)return;
+            float statusWidth=Mathf.Clamp(logicalWidth*.22f,196f,232f);
+            topStatusRect.sizeDelta=new Vector2(statusWidth,42f);
+            topStatusRect.anchoredPosition=new Vector2(-216f,4f);
+            if(topStatusDividerRect!=null)
+                topStatusDividerRect.anchoredPosition=new Vector2(-(216f+statusWidth+6f),4f);
+            if(topResourceViewportRect!=null)
+            {
+                float right=Mathf.Min(216f+statusWidth+16f,Mathf.Max(96f,logicalWidth-140f));
+                topResourceViewportRect.offsetMax=new Vector2(-right,topResourceViewportRect.offsetMax.y);
+            }
+        }
+
+        void ResizeBottomBar(float logicalWidth)
+        {
+            if(bottomViewportRect==null)return;
+            const float rightGroup=264f;
+            float right=Mathf.Min(rightGroup,Mathf.Max(96f,logicalWidth-160f));
+            bottomViewportRect.offsetMax=new Vector2(-right,bottomViewportRect.offsetMax.y);
         }
 
         void Refresh()
@@ -601,20 +691,24 @@ namespace Riverworks
             {
                 float amount=Mathf.Floor(pair.Key==Resource.Coins?s.Coins:sim.Get(pair.Key));
                 string value=((int)amount).ToString("N0");
-                pair.Value.text=Catalog.ResourceName(pair.Key)+"  "+value;
+                pair.Value.text="<color=#8FA1AC>"+Catalog.ResourceName(pair.Key)+"</color>  "+value;
                 float previous;
                 if(displayedResourceValues.TryGetValue(pair.Key,out previous) && amount>previous+.0001f)
                     FeelUiFeedback.PulseResource(pair.Value);
                 displayedResourceValues[pair.Key]=amount;
+                FitResourceChip(pair.Key,pair.Value);
             }
-            string income=sim.LastIncome>=0?"+"+sim.LastIncome.ToString("0.0"):sim.LastIncome.ToString("0.0");
-            populationText.text="주민 "+s.Population+" · 행복 "+s.Happiness+"%\n"+s.Day+"일";
-            incomeText.text="수입\n"+income+"G";
+            string incomeArrow=sim.LastIncome>=0?"▲":"▼";
+            string incomeSign=sim.LastIncome>=0?"+":"";
+            populationText.text="주민 "+s.Population+"  행복 "+s.Happiness+"%\n"+s.Day+"일";
+            incomeText.text="수입\n"+incomeArrow+" "+incomeSign+sim.LastIncome.ToString("0.0")+"G";
             incomeText.color=sim.LastIncome<0?HudStyle.Danger:HudStyle.Text;
             RefreshResearch();
             objectiveTitle.text=sim.ObjectiveTitle ?? "도시를 성장시키세요";
             objectiveBody.text=sim.ObjectiveDescription ?? "생산망과 주거지를 연결하세요.";
             objectiveProgress.text="진행도  "+Mathf.RoundToInt(Mathf.Clamp01(sim.ObjectiveProgress)*100f)+"%";
+            if(objectiveFillRect!=null)objectiveFillRect.anchorMax=new Vector2(Mathf.Clamp01(sim.ObjectiveProgress),1f);
+            if(objectiveChipFillRect!=null)objectiveChipFillRect.anchorMax=new Vector2(Mathf.Clamp01(sim.ObjectiveProgress),1f);
             objectiveChipText.text="목표  ·  "+objectiveTitle.text+"  "+Mathf.RoundToInt(Mathf.Clamp01(sim.ObjectiveProgress)*100f)+"%";
             RefreshInspector(); RefreshBuildChoices(); RefreshBuildInfo();
             RefreshOverview();

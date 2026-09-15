@@ -571,9 +571,9 @@ Avatar:
             - t: {x: 4.8894533e-10, y: 0.0045380513, z: 4.4705648e-10}
               q: {x: 0.30737877, y: 0.0033147936, z: 0.009254194, w: 0.95153666}
               s: {x: 1.0000008, y: 1.0000114, z: 1.00001}
-            - t: {x: 0.0000011951759, y: 0.0052699926, z: 0.000060488226}
+            - t: {x: 0.0000011951759, y: 0.0052699926, z: 0.00006048822}
               q: {x: 0.004184117, y: 0.56906676, z: -0.8222797, w: 0.0014694132}
-              s: {x: 1.0000012, y: 1.0000346, z: 0.99999493}
+              s: {x: 1.0000012, y: 1.0000346, z: 0.9999949}
         m_LeftHand:
           data:
             m_HandBoneIndex: ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff

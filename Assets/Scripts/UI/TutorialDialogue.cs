@@ -167,8 +167,8 @@ namespace Riverworks
             topicButtons.Clear();
             lessonButtons.Clear();
 
-            expandedRoot = Surface("TutorialDialogue", visualParent, HudStyle.Surface, new Vector2(.5f, 0f),
-                new Vector2(0f, 68f), new Vector2(680f, 174f));
+            expandedRoot = Surface("TutorialDialogue", visualParent, HudStyle.Surface, new Vector2(1f, 0f),
+                new Vector2(-8f, 68f), new Vector2(680f, 174f));
             expandedRect = expandedRoot.GetComponent<RectTransform>();
             FeelUiFeedback.AttachPanel(expandedRoot);
 
@@ -212,7 +212,7 @@ namespace Riverworks
             advanceText = advanceButton.GetComponentInChildren<Text>();
             advanceRect = advanceButton.GetComponent<RectTransform>();
 
-            Button more = MakeButton("...", expandedRoot.transform, new Vector2(598f, -124f),
+            Button more = MakeButton("더보기", expandedRoot.transform, new Vector2(598f, -124f),
                 new Vector2(68f, HudStyle.TouchSize), HudStyle.SurfaceRaised, OnToggleMorePopup);
             more.name = "Button_TutorialMore";
             moreRect = more.GetComponent<RectTransform>();
@@ -255,7 +255,7 @@ namespace Riverworks
             BuildLessonPicker();
 
             collapsedRoot = Surface("TutorialDialogueHint", visualParent, HudStyle.Surface,
-                 new Vector2(0f, 1f), new Vector2(8f, -110f), new Vector2(292f, 44f));
+                 new Vector2(0f, 1f), new Vector2(8f, -278f), new Vector2(292f, 44f));
             Surface("TutorialDialogueHintAccent", collapsedRoot.transform, HudStyle.Accent,
                 new Vector2(0f, 1f), Vector2.zero, new Vector2(4f, 44f), null);
             Button reopen = collapsedRoot.AddComponent<Button>();
@@ -661,7 +661,7 @@ namespace Riverworks
         {
             if (advanceText == null || director == null) return;
             if (typing) advanceText.text = "바로 보기";
-            else if (pageIndex + 1 < pages.Count) advanceText.text = "다음 쪽";
+            else if (pageIndex + 1 < pages.Count) advanceText.text = "다음";
             else if (director.IsLessonMode) advanceText.text = "확인";
             else if (director.IsAdviceMode) advanceText.text = director.CanResume ? "이어하기" : "닫기";
             else advanceText.text = director.GoalSatisfied ? "계속" : "해 보기";
@@ -880,7 +880,8 @@ namespace Riverworks
         static string GoalLabel(string value, bool satisfied, bool advice)
         {
             if (advice || string.IsNullOrWhiteSpace(value)) return advice ? "장부에서 궁금한 주제를 골라 보세요." : "";
-            return (satisfied ? "✓ " : "◆ ") + value;
+            // The bundled pixel font has no check-mark glyph, so satisfied goals use covered text.
+            return (satisfied ? "완료 · " : "◆ ") + value;
         }
 
         static string TrimForChip(string value)
@@ -952,7 +953,7 @@ namespace Riverworks
 
             expandedRect.sizeDelta = new Vector2(width, advice ? 230f : 174f);
             float constructionOffset = constructionVisible ? constructionHeight + 8f : 0f;
-            expandedRect.anchoredPosition = new Vector2(0f, 68f + constructionOffset);
+            expandedRect.anchoredPosition = new Vector2(-8f, 68f + constructionOffset);
 
             SetWidth(bodyHitRect, width - 28f);
             SetWidth(bodyText == null ? null : bodyText.rectTransform, width - 48f);

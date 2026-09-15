@@ -584,10 +584,11 @@ namespace Riverworks
             ClampModalWindow(factoryConfigureWindow,new Vector2(900,factoryConfigureWindow==null?700:factoryConfigureWindow.sizeDelta.y),24);
             if (researchWindow != null)
             {
-                RectTransform overlay = researchOverlay.transform as RectTransform;
-                float scale = Mathf.Max(1, canvasScaler == null ? 1 : canvasScaler.scaleFactor);
-                float availableWidth = overlay != null && overlay.rect.width > 0 ? overlay.rect.width : width / scale;
-                float availableHeight = overlay != null && overlay.rect.height > 0 ? overlay.rect.height : height / scale;
+                // The canvas root rect still reflects the previous scale in this frame, so the
+                // integer-scaled safe size is authoritative for the newly applied scale.
+                Vector2 logical = LogicalSafeSize();
+                float availableWidth = logical.x;
+                float availableHeight = logical.y;
                 researchWindow.anchorMin = researchWindow.anchorMax = new Vector2(.5f, .5f);
                 bool desktopMargins = availableHeight >= 480;
                 researchWindow.anchoredPosition = new Vector2(0, desktopMargins ? 4 : 0);
@@ -601,12 +602,20 @@ namespace Riverworks
         void ClampModalWindow(RectTransform window,Vector2 preferred,float margin)
         {
             if(window==null)return;
-            RectTransform parent=window.parent as RectTransform;
-            Vector2 pixels=HudStyle.PixelDimensions(hudCanvas);float scale=Mathf.Max(1,canvasScaler==null?1:canvasScaler.scaleFactor);
-            float width=parent!=null&&parent.rect.width>0?parent.rect.width:pixels.x/scale;
-            float height=parent!=null&&parent.rect.height>0?parent.rect.height:pixels.y/scale;
+            Vector2 logical=LogicalSafeSize();
+            float width=logical.x;
+            float height=logical.y;
             window.anchorMin=window.anchorMax=new Vector2(.5f,.5f);window.anchoredPosition=Vector2.zero;
             window.sizeDelta=new Vector2(Mathf.Min(preferred.x,Mathf.Max(180,width-margin*2)),Mathf.Min(preferred.y,Mathf.Max(120,height-margin*2)));
+        }
+
+        Vector2 LogicalSafeSize()
+        {
+            float scale=Mathf.Max(1,canvasScaler==null?1:canvasScaler.scaleFactor);
+            Vector2 pixels=currentSafePixels.width>.5f&&currentSafePixels.height>.5f
+                ? new Vector2(currentSafePixels.width,currentSafePixels.height)
+                : HudStyle.PixelDimensions(hudCanvas);
+            return new Vector2(Mathf.Max(1f,pixels.x/scale),Mathf.Max(1f,pixels.y/scale));
         }
 
         GameObject Overlay(string name)
