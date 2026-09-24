@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RIVERWORKS — 정착지 위의 공장</title>
+<meta name="description" content="정착지를 먹이며 벨트와 파이프로 공장을 잇는 로우폴리 도시 게임. Windows에서 바로 실행합니다.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&family=Nanum+Myeongjo:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #14201c;
+    --moss: #1c3a30;
+    --paper: #f4efe4;
+    --card: #fffaf1;
+    --line: #d9d0c0;
+    --brass: #b9842f;
+    --brass-deep: #8c6118;
+    --night: #101816;
+    --quiet: #5c675f;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 500px at 80% -10%, #efe6d2 0%, transparent 55%),
+      var(--paper);
+    font-family: "IBM Plex Sans KR", "Malgun Gothic", sans-serif;
+    font-size: 17px;
+    line-height: 1.65;
+  }
+  a { color: var(--brass-deep); }
+  .wrap { width: min(1080px, calc(100% - 40px)); margin: 0 auto; }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 22px 0 8px;
+  }
+  .mark {
+    font-family: "Nanum Myeongjo", serif;
+    letter-spacing: 0.16em;
+    font-size: 14px;
+  }
+  nav { display: flex; gap: 18px; align-items: center; font-size: 14px; }
+  nav a { color: var(--ink); text-decoration: none; }
+  .btn {
+    display: inline-block;
+    background: var(--ink);
+    color: var(--paper);
+    text-decoration: none;
+    padding: 12px 18px;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .btn.light { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .hero { display: grid; grid-template-columns: 1fr 1.15fr; gap: 42px; align-items: center; padding: 28px 0 18px; }
+  h1 {
+    font-family: "Nanum Myeongjo", serif;
+    font-weight: 700;
+    font-size: clamp(40px, 6vw, 68px);
+    line-height: 1.15;
+    letter-spacing: -0.03em;
+    margin: 0 0 14px;
+  }
+  .lede { font-size: 18px; margin: 0 0 22px; max-width: 38ch; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .note { color: var(--quiet); font-size: 13px; margin-top: 12px; }
+  figure { margin: 0; }
+  figure img, .shot img {
+    width: 100%;
+    display: block;
+    border-radius: 18px;
+    border: 1px solid #cfc6b4;
+    box-shadow: 0 18px 40px rgba(20, 32, 28, 0.12);
+  }
+  figcaption { color: var(--quiet); font-size: 13px; margin-top: 8px; }
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    margin: 28px 0 10px;
+  }
+  .fact {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 18px 18px 16px;
+  }
+  .fact strong { display: block; font-family: "Nanum Myeongjo", serif; font-size: 22px; margin-bottom: 4px; }
+  .fact span { color: var(--quiet); font-size: 14px; }
+  section { padding: 42px 0; }
+  h2 {
+    font-family: "Nanum Myeongjo", serif;
+    font-size: 32px;
+    margin: 0 0 8px;
+  }
+  .sub { color: var(--quiet); margin: 0 0 22px; }
+  .gallery { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 14px; }
+  .shot.tall img { height: 100%; object-fit: cover; }
+  ol.steps { padding: 0; margin: 0; list-style: none; display: grid; gap: 12px; }
+  ol.steps li {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 12px;
+    align-items: start;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px 16px;
+  }
+  ol.steps b {
+    font-family: "Nanum Myeongjo", serif;
+    font-size: 22px;
+    color: var(--brass-deep);
+  }
+  .tree {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  .tree div {
+    background: var(--night);
+    color: #f3ecdf;
+    border-radius: 14px;
+    padding: 16px;
+    min-height: 118px;
+  }
+  .tree small { color: #c8b89a; display: block; margin-bottom: 6px; }
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 28px 0 48px;
+    color: var(--quiet);
+    font-size: 14px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  @media (max-width: 800px) {
+    .hero, .facts, .gallery, .tree { grid-template-columns: 1fr; }
+    nav .hide { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="mark">RIVERWORKS</div>
+      <nav>
+        <a class="hide" href="#play">하는 일</a>
+        <a class="hide" href="#get">받는 법</a>
+        <a class="btn" href="https://github.com/atozuser0224/riverworks-city/releases/latest">Windows 받기</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div>
+        <h1>마을을 먹이고,<br>줄을 잇습니다.</h1>
+        <p class="lede">로우폴리 정착지 위에서 벨트와 파이프로 공장을 짓는 게임입니다. 주민은 길을 걷고, 만든 물건은 재고로 들어옵니다.</p>
+        <div class="actions">
+          <a class="btn" href="https://github.com/atozuser0224/riverworks-city/releases/download/v0.26.0/Riverworks-v0.26.0-Windows-x64.zip">v0.26.0 내려받기</a>
+          <a class="btn light" href="https://github.com/atozuser0224/riverworks-city">소스 보기</a>
+        </div>
+        <p class="note">Windows 64비트. 설치 프로그램은 없고, 압축을 풀어 Riverworks.exe를 실행합니다.</p>
+      </div>
+      <figure>
+        <img src="Docs/Images/riverworks-v0.6.png" alt="나무 지붕 집과 밭, 마을 서기 단우가 있는 시작 마을">
+        <figcaption>시작 마을. 서기 단우가 첫 길을 안내합니다.</figcaption>
+      </figure>
+    </section>
+
+    <div class="facts">
+      <div class="fact"><strong>한 지도</strong><span>집과 공장이 같은 21×21 땅 위에 있습니다. 공장만의 별도 바닥은 없습니다.</span></div>
+      <div class="fact"><strong>실제 물류</strong><span>벨트는 고체, 파이프는 유체를 옮깁니다. 막히면 앞 기계도 멈춥니다.</span></div>
+      <div class="fact"><strong>원시에서 산업까지</strong><span>현재 받는 빌드는 야영지에서 시작해 연구와 공장, 대륙 지도까지 이어집니다.</span></div>
+    </div>
+
+    <section id="play">
+      <h2>화면에서 하는 일</h2>
+      <p class="sub">숫자를 올리기만 하는 도시가 아닙니다. 줄이 이어져야 재고가 찹니다.</p>
+      <div class="gallery">
+        <figure class="shot">
+          <img src="Docs/Images/expansion-v0.9.png" alt="도로를 따라 늘어선 붉은 탱크와 3층 공장">
+          <figcaption>도로 옆 탱크와 층이 있는 공장. 전력선이 설비를 잇습니다.</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="Docs/Images/research-tree-v0.7.png" alt="중세와 르네상스로 갈라진 연구 트리">
+          <figcaption>연구는 선행이 있는 트리입니다. 아는 것만 지을 수 있습니다.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>한 판의 결</h2>
+      <div class="tree">
+        <div><small>아침</small>집을 잇고 먹을 것과 장작을 남깁니다. 사람이 늘면 식량도 늘어야 합니다.</div>
+        <div><small>줄</small>채집과 제분, 제빵을 벨트로 잇습니다. 출구가 막히면 생산도 멈춥니다.</div>
+        <div><small>불</small>겨울과 대한파에 화로를 켭니다. 장작으로 시작하고, 나중에는 석탄이 더 넓습니다.</div>
+        <div><small>공장</small>구리, 석유, 알루미늄을 부품으로 바꿉니다. 제어 장치까지가 긴 제조입니다.</div>
+      </div>
+    </section>
+
+    <section id="get">
+      <h2>받는 법</h2>
+      <ol class="steps">
+        <li><b>1</b><div><strong>ZIP을 받습니다.</strong><br><a href="https://github.com/atozuser0224/riverworks-city/releases/download/v0.26.0/Riverworks-v0.26.0-Windows-x64.zip">Riverworks-v0.26.0-Windows-x64.zip</a> 과 같은 폴더의 sha256 파일을 함께 받을 수 있습니다.</div></li>
+        <li><b>2</b><div><strong>폴더째 풉니다.</strong><br>한 파일만 빼지 마세요. 옆의 데이터 폴더가 있어야 실행됩니다.</div></li>
+        <li><b>3</b><div><strong>Riverworks.exe</strong><br>Unity를 설치하지 않아도 됩니다. 소스를 고치려면 Unity 6000.5.5f1과 안내 문서가 필요합니다.</div></li>
+      </ol>
+    </section>
+
+    <footer>
+      <div>Riverworks Studio · 공개 빌드 v0.26.0</div>
+      <div><a href="https://github.com/atozuser0224/riverworks-city/releases/tag/v0.26.0">릴리스 기록</a> · <a href="https://github.com/atozuser0224/riverworks-city/blob/main/Docs/PLAYER_GUIDE.ko.md">플레이 안내</a></div>
+    </footer>
+  </div>
+</body>
+</html>
